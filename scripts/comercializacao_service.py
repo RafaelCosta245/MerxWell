@@ -90,7 +90,12 @@ def _parse_year_from_date(value: Any) -> int | None:
             return None
 
 
-def get_client_dashboard_data(client_name: str) -> Dict[str, Any]:
+def get_client_dashboard_data(
+    client_name: str,
+    energy_type: str | None = None,
+    submarket: str | None = None,
+    contract_type: str | None = None,
+) -> Dict[str, Any]:
     """Calcula métricas e séries de volumes por ano para um cliente.
 
     Compra:
@@ -101,7 +106,15 @@ def get_client_dashboard_data(client_name: str) -> Dict[str, Any]:
         `name == client_name`.
     """
     # Contratos em que o cliente é comprador
-    buy_contracts = read_records("contracts", filters={"contractor": client_name})
+    buy_filters: Dict[str, Any] = {"contractor": client_name}
+    if energy_type:
+        buy_filters["energy_source_type"] = energy_type
+    if submarket:
+        buy_filters["submarket"] = submarket
+    if contract_type:
+        buy_filters["contract_type"] = contract_type
+
+    buy_contracts = read_records("contracts", filters=buy_filters)
     _debug_print(
         f"Cliente {client_name}: contratos de COMPRA encontrados",
         data=[
@@ -123,7 +136,18 @@ def get_client_dashboard_data(client_name: str) -> Dict[str, Any]:
     # Contratos em que o cliente é vendedor
     sell_contracts: List[Dict[str, Any]] = []
     if trader_ids:
-        sell_contracts = read_records_in("contracts", "trader_id", trader_ids)
+        raw_sell_contracts = read_records_in("contracts", "trader_id", trader_ids)
+
+        def _matches_filters(contract: Dict[str, Any]) -> bool:
+            if energy_type and str(contract.get("energy_source_type")) != energy_type:
+                return False
+            if submarket and str(contract.get("submarket")) != submarket:
+                return False
+            if contract_type and str(contract.get("contract_type")) != contract_type:
+                return False
+            return True
+
+        sell_contracts = [c for c in raw_sell_contracts if _matches_filters(c)]
     _debug_print(
         f"Cliente {client_name}: contratos de VENDA encontrados",
         data=[
@@ -267,15 +291,30 @@ def get_client_dashboard_data(client_name: str) -> Dict[str, Any]:
                 "months": MONTH_LABELS,
                 "buy": [0.0] * 12,
                 "sell": [0.0] * 12,
+                "buy_price_num": 0.0,
+                "buy_volume": 0.0,
+                "sell_price_num": 0.0,
+                "sell_volume": 0.0,
             },
         )
 
+        row_volume = 0.0
         for index, month_key in enumerate(MONTH_KEYS):
             value = float(row.get(month_key) or 0.0)
+            row_volume += value
             if direction == "buy":
                 year_data["buy"][index] += value
             else:
                 year_data["sell"][index] += value
+
+        price = float(row.get("price_energy") or 0.0)
+        if row_volume > 0:
+            if direction == "buy":
+                year_data["buy_price_num"] += price * row_volume
+                year_data["buy_volume"] += row_volume
+            else:
+                year_data["sell_price_num"] += price * row_volume
+                year_data["sell_volume"] += row_volume
 
     if allowed_years:
         for year in list(years.keys()):
@@ -292,8 +331,22 @@ def get_client_dashboard_data(client_name: str) -> Dict[str, Any]:
                     "months": MONTH_LABELS,
                     "buy": [0.0] * 12,
                     "sell": [0.0] * 12,
+                    "buy_price_num": 0.0,
+                    "buy_volume": 0.0,
+                    "sell_price_num": 0.0,
+                    "sell_volume": 0.0,
                 },
             )
+
+    # Calcula preço médio ponderado por ano/direção
+    for year, data in years.items():
+        buy_vol = float(data.get("buy_volume") or 0.0)
+        sell_vol = float(data.get("sell_volume") or 0.0)
+        buy_num = float(data.get("buy_price_num") or 0.0)
+        sell_num = float(data.get("sell_price_num") or 0.0)
+
+        data["buy_avg_price"] = buy_num / buy_vol if buy_vol > 0 else 0.0
+        data["sell_avg_price"] = sell_num / sell_vol if sell_vol > 0 else 0.0
 
     _debug_print(
         "Anos permitidos considerando contratos",

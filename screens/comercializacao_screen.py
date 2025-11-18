@@ -24,8 +24,17 @@ class ComercializacaoScreen(BaseScreen):
         params = params or {}
         selected_submenu = params.get("submenu", "visao")
         selected_client = params.get("client")
+        energy_type = params.get("energy_type")
+        submarket = params.get("submarket")
+        contract_type = params.get("contract_type")
 
-        return self._create_main_content(selected_submenu, selected_client)
+        return self._create_main_content(
+            selected_submenu,
+            selected_client,
+            energy_type,
+            submarket,
+            contract_type,
+        )
 
     # def create_footer(self) -> ft.Control:
     #     return self._create_footer_container()
@@ -50,6 +59,9 @@ class ComercializacaoScreen(BaseScreen):
         self,
         selected_submenu: str,
         selected_client: Optional[str],
+        energy_type: Optional[str],
+        submarket: Optional[str],
+        contract_type: Optional[str],
     ) -> ft.Control:
         """Cria o layout principal com submenu à esquerda e conteúdo à direita."""
         return ft.Container(
@@ -58,7 +70,13 @@ class ComercializacaoScreen(BaseScreen):
             content=ft.Row(
                 controls=[
                     self._create_submenu_column(selected_submenu),
-                    self._create_subcontent_area(selected_submenu, selected_client),
+                    self._create_subcontent_area(
+                        selected_submenu,
+                        selected_client,
+                        energy_type,
+                        submarket,
+                        contract_type,
+                    ),
                 ],
                 spacing=20,
                 vertical_alignment=ft.CrossAxisAlignment.START,
@@ -145,10 +163,18 @@ class ComercializacaoScreen(BaseScreen):
         self,
         selected_submenu: str,
         selected_client: Optional[str],
+        energy_type: Optional[str],
+        submarket: Optional[str],
+        contract_type: Optional[str],
     ) -> ft.Control:
         """Seleciona o conteúdo de acordo com o submenu escolhido."""
         if selected_submenu == "visao":
-            inner = self._create_visao_dashboard(selected_client)
+            inner = self._create_visao_dashboard(
+                selected_client,
+                energy_type,
+                submarket,
+                contract_type,
+            )
         elif selected_submenu == "visao_geral":
             inner = self._create_dashboard_content()
         elif selected_submenu == "fluxos":
@@ -183,7 +209,13 @@ class ComercializacaoScreen(BaseScreen):
     # ------------------------------------------------------------------
     # Visão - Dashboard por cliente
     # ------------------------------------------------------------------
-    def _create_visao_dashboard(self, selected_client: Optional[str]) -> ft.Control:
+    def _create_visao_dashboard(
+        self,
+        selected_client: Optional[str],
+        energy_type: Optional[str],
+        submarket: Optional[str],
+        contract_type: Optional[str],
+    ) -> ft.Control:
         """Cria o dashboard de contratos por cliente.
 
         Exibe um filtro de cliente, métricas agregadas e gráficos por ano
@@ -193,10 +225,21 @@ class ComercializacaoScreen(BaseScreen):
 
         client_value = selected_client if selected_client in clients else None
 
-        client_filter = self._create_client_filter(clients, client_value)
+        filters_row, current_filters = self._create_filters_row(
+            clients,
+            client_value,
+            energy_type,
+            submarket,
+            contract_type,
+        )
 
         if client_value:
-            data = get_client_dashboard_data(client_value)
+            data = get_client_dashboard_data(
+                client_value,
+                energy_type=current_filters["energy_type"],
+                submarket=current_filters["submarket"],
+                contract_type=current_filters["contract_type"],
+            )
             print(
                 "[ComercializacaoScreen] Dados do serviço",
                 {
@@ -226,7 +269,7 @@ class ComercializacaoScreen(BaseScreen):
                         size=20,
                         weight=ft.FontWeight.BOLD,
                     ),
-                    client_filter,
+                    filters_row,
                     metrics_row,
                     charts,
                 ],
@@ -235,29 +278,95 @@ class ComercializacaoScreen(BaseScreen):
             ),
         )
 
-    def _create_client_filter(
+    def _create_filters_row(
         self,
         clients: list[str],
         selected_client: Optional[str],
-    ) -> ft.Control:
-        """Cria o filtro de seleção de cliente."""
-        options = [ft.dropdown.Option(c) for c in clients]
+        energy_type: Optional[str],
+        submarket: Optional[str],
+        contract_type: Optional[str],
+    ) -> tuple[ft.Control, Dict[str, Optional[str]]]:
+        """Cria a linha de filtros (cliente + tipo de energia + submercado + modalidade)."""
 
-        def on_change(e: ft.ControlEvent) -> None:
-            value = e.control.value
+        dropdown_width = 220
+
+        client_dd = ft.Dropdown(
+            label="Cliente",
+            hint_text="Escolha um cliente...",
+            options=[ft.dropdown.Option(c) for c in clients],
+            value=selected_client,
+            width=dropdown_width,
+        )
+
+        energy_dd = ft.Dropdown(
+            label="Tipo de Energia",
+            hint_text="Todos",
+            options=[
+                ft.dropdown.Option("I5"),
+                ft.dropdown.Option("I1"),
+                ft.dropdown.Option("I0"),
+                ft.dropdown.Option("CONV"),
+                ft.dropdown.Option("CQ5"),
+            ],
+            value=energy_type,
+            width=dropdown_width,
+        )
+
+        submarket_dd = ft.Dropdown(
+            label="Submercado",
+            hint_text="Todos",
+            options=[
+                ft.dropdown.Option("SE/CO"),
+                ft.dropdown.Option("NE"),
+                ft.dropdown.Option("N"),
+                ft.dropdown.Option("S"),
+            ],
+            value=submarket,
+            width=dropdown_width,
+        )
+
+        contract_type_dd = ft.Dropdown(
+            label="Modalidade",
+            hint_text="Todas",
+            options=[
+                ft.dropdown.Option("ATACADISTA"),
+                ft.dropdown.Option("VAREJISTA"),
+                ft.dropdown.Option("AUTOPRODUÇÃO"),
+            ],
+            value=contract_type,
+            width=dropdown_width,
+        )
+
+        def apply_filters(_: ft.ControlEvent) -> None:
             self.navigation.go(
                 "/comercializacao",
-                params={"submenu": "visao", "client": value},
+                params={
+                    "submenu": "visao",
+                    "client": client_dd.value,
+                    "energy_type": energy_dd.value,
+                    "submarket": submarket_dd.value,
+                    "contract_type": contract_type_dd.value,
+                },
             )
 
-        return ft.Dropdown(
-            label="Selecionar Cliente",
-            hint_text="Escolha um cliente...",
-            options=options,
-            value=selected_client,
-            width=320,
-            on_change=on_change,
+        client_dd.on_change = apply_filters
+        energy_dd.on_change = apply_filters
+        submarket_dd.on_change = apply_filters
+        contract_type_dd.on_change = apply_filters
+
+        row = ft.Row(
+            controls=[client_dd, energy_dd, submarket_dd, contract_type_dd],
+            spacing=16,
+            alignment=ft.MainAxisAlignment.START,
         )
+
+        current_filters = {
+            "energy_type": energy_type,
+            "submarket": submarket,
+            "contract_type": contract_type,
+        }
+
+        return row, current_filters
 
     def _create_client_metrics_row(self, data: Dict[str, Any]) -> ft.Control:
         """Exibe métricas agregadas de contratos do cliente."""
@@ -369,6 +478,9 @@ class ComercializacaoScreen(BaseScreen):
             },
         )
 
+        buy_avg_price = float(year_data.get("buy_avg_price", 0.0) or 0.0)
+        sell_avg_price = float(year_data.get("sell_avg_price", 0.0) or 0.0)
+
         bar_groups: list[ft.BarChartGroup] = []
         for i, label in enumerate(months):
             bar_groups.append(
@@ -428,6 +540,11 @@ class ComercializacaoScreen(BaseScreen):
         )
 
         # Legenda simples compra/venda
+        def _format_price(label: str, value: float) -> str:
+            if value <= 0:
+                return f"{label} - Preço médio: N/A"
+            return f"{label} - Preço médio: R$ {value:.2f}/MWh"
+
         legend = ft.Row(
             controls=[
                 ft.Row(
@@ -438,7 +555,11 @@ class ComercializacaoScreen(BaseScreen):
                             bgcolor=ft.Colors.GREEN_400,
                             border_radius=4,
                         ),
-                        ft.Text("Compra", size=12),
+                        ft.Text(
+                            _format_price("Compra", buy_avg_price),
+                            size=11,
+                            color=ft.Colors.GREY_700,
+                        ),
                     ],
                     spacing=6,
                 ),
@@ -450,7 +571,11 @@ class ComercializacaoScreen(BaseScreen):
                             bgcolor=ft.Colors.BLUE_400,
                             border_radius=4,
                         ),
-                        ft.Text("Venda", size=12),
+                        ft.Text(
+                            _format_price("Venda", sell_avg_price),
+                            size=11,
+                            color=ft.Colors.GREY_700,
+                        ),
                     ],
                     spacing=6,
                 ),
