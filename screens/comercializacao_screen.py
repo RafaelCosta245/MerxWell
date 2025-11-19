@@ -11,6 +11,7 @@ from screens import (
     comercializacao_fluxos,
     comercializacao_clientes,
     comercializacao_produtos,
+    comercializacao_sazo,
 )
 from scripts.comercializacao_service import (
     MONTH_LABELS,
@@ -41,6 +42,9 @@ class ComercializacaoScreen(BaseScreen):
         buyer_filter = params.get("buyer")
         seller_filter = params.get("seller")
         contracts_view = params.get("contracts_view")
+        contract_id = params.get("contract_id")
+        start_date = params.get("start_date")
+        end_date = params.get("end_date")
 
         return self._create_main_content(
             selected_submenu,
@@ -51,6 +55,9 @@ class ComercializacaoScreen(BaseScreen):
             buyer_filter,
             seller_filter,
             contracts_view,
+            contract_id,
+            start_date,
+            end_date,
         )
 
     # def create_footer(self) -> ft.Control:
@@ -82,6 +89,9 @@ class ComercializacaoScreen(BaseScreen):
         buyer_filter: Optional[str],
         seller_filter: Optional[str],
         contracts_view: Optional[str],
+        contract_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> ft.Control:
         """Cria o layout principal com submenu à esquerda e conteúdo à direita."""
         return ft.Container(
@@ -99,6 +109,9 @@ class ComercializacaoScreen(BaseScreen):
                         buyer_filter,
                         seller_filter,
                         contracts_view,
+                        contract_id,
+                        start_date,
+                        end_date,
                     ),
                 ],
                 spacing=20,
@@ -192,6 +205,9 @@ class ComercializacaoScreen(BaseScreen):
         buyer_filter: Optional[str],
         seller_filter: Optional[str],
         contracts_view: Optional[str],
+        contract_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> ft.Control:
         """Seleciona o conteúdo de acordo com o submenu escolhido."""
         print(
@@ -220,9 +236,20 @@ class ComercializacaoScreen(BaseScreen):
                     self,
                     buyer_filter,
                     seller_filter,
+                    contract_id=contract_id,
                 )
                 # Para isolar o problema de tela em branco, retornamos o
                 # formulário diretamente, sem envolver no wrapper de scroll.
+                return inner
+
+            elif contracts_view == "sazo":
+                print("[ComercializacaoScreen] Abrindo formulário de sazonalidade")
+                inner = comercializacao_sazo.create_sazo_content(
+                    self,
+                    contract_id=contract_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
                 return inner
             else:
                 print("[ComercializacaoScreen] Abrindo listagem de contratos")

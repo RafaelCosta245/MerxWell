@@ -5,7 +5,7 @@ from datetime import datetime
 
 import flet as ft
 
-from scripts.database import read_records, create_record
+from scripts.database import read_records, create_record, update_record
 
 
 def _parse_date_br(value: str) -> Optional[str]:
@@ -18,21 +18,43 @@ def _parse_date_br(value: str) -> Optional[str]:
     except Exception:
         return None
 
+def _format_date_br(value: Optional[str]) -> str:
+    """Converte ISO 'aaaa-mm-dd' para 'dd/mm/aaaa'. Retorna vazio se None."""
+    if not value:
+        return ""
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt.strftime("%d/%m/%Y")
+    except Exception:
+        return ""
+
 
 def create_novo_contrato_content(
     screen: Any,
     buyer_filter: Optional[str],
     seller_filter: Optional[str],
+    contract_id: Optional[str] = None,
 ) -> ft.Control:
-    """Formulário de novo contrato para a aba Contratos.
+    """Formulário de novo contrato ou edição para a aba Contratos.
 
-    Ao salvar, apenas imprime no console o dicionário completo de campos
-    da tabela `contracts` e volta para a listagem de contratos.
+    Ao salvar, cria ou atualiza o registro na tabela `contracts` e volta para a listagem.
     """
+
+    is_editing = bool(contract_id)
+    title_text = "Editar Contrato" if is_editing else "Novo Contrato"
+    
+    existing_data = {}
+    if is_editing:
+        try:
+            records = read_records("contracts", {"id": contract_id})
+            if records:
+                existing_data = records[0]
+        except Exception as e:
+            print(f"Erro ao carregar contrato: {e}")
 
     # ------------------------ Campos básicos ------------------------
     # Comercializadora vinculada (trader_id) e prestador (service_provider)
-    print("[Novo Contrato] Carregando formulário de novo contrato...")
+    print(f"[{title_text}] Carregando formulário...")
 
     # Carrega lista de traders do banco para popular o dropdown
     traders_db = read_records("traders", filters=None)
@@ -40,6 +62,24 @@ def create_novo_contrato_content(
     traders_db.sort(key=lambda t: (t.get("name") or "").lower())
 
     trader_options = []
+    current_trader_name = None
+    
+    # Se editando, tenta achar o nome do trader pelo ID
+    if is_editing:
+        t_id = existing_data.get("trader_id")
+        print(f"[{title_text}] Trader ID do contrato: {t_id}")
+        
+        if t_id:
+            for t in traders_db:
+                # Comparação segura convertendo para string
+                if str(t.get("id")) == str(t_id):
+                    current_trader_name = t.get("name")
+                    print(f"[{title_text}] Trader encontrado: {current_trader_name}")
+                    break
+            
+            if not current_trader_name:
+                print(f"[{title_text}] AVISO: Trader ID {t_id} não encontrado na lista de traders.")
+
     for t in traders_db:
         name = t.get("name")
         if name:
@@ -52,12 +92,14 @@ def create_novo_contrato_content(
         label="Comercializadora Vinculada",
         hint_text="Selecione...",
         options=trader_options,
+        value=current_trader_name,
         width=380,
     )
 
     prestador_field = ft.TextField(
         label="Prestador de Serviço",
         hint_text="Será preenchido a partir da comercializadora",
+        value=existing_data.get("service_provider") or "",
         read_only=True,
         bgcolor=ft.Colors.GREY_100,
         width=380,
@@ -65,12 +107,14 @@ def create_novo_contrato_content(
 
     def _sync_prestador(e: ft.ControlEvent) -> None:
         prestador_field.value = comercializadora_dd.value or ""
+        prestador_field.update()
 
     comercializadora_dd.on_change = _sync_prestador
 
     contractor_field = ft.TextField(
         label="Contratante",
         hint_text="Nome da empresa cliente",
+        value=existing_data.get("contractor") or "",
         width=380,
     )
 
@@ -82,18 +126,21 @@ def create_novo_contrato_content(
             ft.dropdown.Option("VAREJISTA"),
             ft.dropdown.Option("AUTOPRODUÇÃO"),
         ],
+        value=existing_data.get("contract_type"),
         width=380,
     )
 
     contract_code_field = ft.TextField(
         label="Código do Contrato",
         hint_text="Ex: CONT-2025-001",
+        value=existing_data.get("contract_code") or "",
         width=380,
     )
 
     start_date_field = ft.TextField(
         label="Data de Início",
         hint_text="dd/mm/aaaa",
+        value=_format_date_br(existing_data.get("contract_start_date")),
         width=380,
         suffix_icon=ft.Icons.CALENDAR_MONTH,
     )
@@ -101,34 +148,48 @@ def create_novo_contrato_content(
     end_date_field = ft.TextField(
         label="Data de Término",
         hint_text="dd/mm/aaaa",
+        value=_format_date_br(existing_data.get("contract_end_date")),
         width=380,
         suffix_icon=ft.Icons.CALENDAR_MONTH,
     )
 
     # ------------------------ Campos comerciais ------------------------
+    def _fmt_float(val):
+        return str(val).replace('.', ',') if val is not None else ""
+
     fee_tax_field = ft.TextField(
         label="Taxa de Fee (R$/MWh)",
         hint_text="Ex: 2.50",
+        value=_fmt_float(existing_data.get("fee_tax")),
         width=380,
     )
 
     energy_note_date_field = ft.TextField(
         label="Data da Nota de Energia (du)",
         hint_text="Dia de vencimento",
+        value=str(existing_data.get("energy_note_date") or ""),
         width=380,
     )
 
     has_proinfa_cb = ft.Checkbox(
         label="Possui Desconto PROINFA",
-        value=False,
+        value=bool(existing_data.get("has_proinfa_discount")),
     )
 
     financial_guarantee_cb = ft.Checkbox(
         label="Garantia Financeira Ativa",
-        value=False,
+        value=False, # Campo não existe na tabela contracts, mantido como placeholder visual ou se for adicionado depois
     )
 
     # ------------------------ Campos técnicos ------------------------
+    # Mapeamento reverso para exibir no dropdown
+    energy_source_map_rev = {
+        "CONVENCIONAL": "CONV",
+        "I5": "I5",
+        "I1": "I1",
+        "CQ5": "CQ5",
+    }
+    es_val = existing_data.get("energy_source_type")
     energy_source_dd = ft.Dropdown(
         label="Tipo de Fonte de Energia",
         hint_text="Selecione...",
@@ -138,9 +199,17 @@ def create_novo_contrato_content(
             ft.dropdown.Option("I1"),
             ft.dropdown.Option("CQ5"),
         ],
+        value=energy_source_map_rev.get(es_val, es_val),
         width=380,
     )
 
+    submarket_map_rev = {
+        "SUDESTE": "SE/CO",
+        "NORDESTE": "NE",
+        "NORTE": "N",
+        "SUL": "S",
+    }
+    sm_val = existing_data.get("submarket")
     submarket_dd = ft.Dropdown(
         label="Submercado",
         hint_text="Selecione...",
@@ -150,54 +219,61 @@ def create_novo_contrato_content(
             ft.dropdown.Option("N"),
             ft.dropdown.Option("S"),
         ],
+        value=submarket_map_rev.get(sm_val, sm_val),
         width=380,
     )
 
     power_load_factor_field = ft.TextField(
         label="Fator de Carga (%)",
         hint_text="Ex: 85.5",
+        value=_fmt_float(existing_data.get("power_load_factor")),
         width=380,
     )
 
     flex_min_field = ft.TextField(
         label="Flex Mínima (%)",
         hint_text="Ex: -10",
+        value=_fmt_float(existing_data.get("flex_min")),
         width=380,
     )
 
     flex_max_field = ft.TextField(
         label="Flex Máxima (%)",
         hint_text="Ex: +10",
+        value=_fmt_float(existing_data.get("flex_max")),
         width=380,
     )
 
     seasonality_min_field = ft.TextField(
         label="Sazonalidade Mínima (%)",
         hint_text="Ex: -20",
+        value=_fmt_float(existing_data.get("seasonality_min")),
         width=380,
     )
 
     seasonality_max_field = ft.TextField(
         label="Sazonalidade Máxima (%)",
         hint_text="Ex: +20",
+        value=_fmt_float(existing_data.get("seasonality_max")),
         width=380,
     )
 
     looses_field = ft.TextField(
         label="Perdas Técnicas (%)",
         hint_text="Ex: 3.0",
+        value=_fmt_float(existing_data.get("looses")),
         width=380,
     )
 
     # ------------------------ Configurações ------------------------
     is_active_switch = ft.Switch(
         label="Contrato Ativo",
-        value=True,
+        value=bool(existing_data.get("is_active", True)),
     )
 
     automatic_billing_switch = ft.Switch(
         label="Faturamento Automático Liberado",
-        value=False,
+        value=bool(existing_data.get("automatic_billing_released", False)),
     )
 
     # ------------------------ Layout em abas ------------------------
@@ -315,10 +391,6 @@ def create_novo_contrato_content(
                     trader_id_to_save = t.get("id")
                     break
         
-        # Se não achou ID (ex: caso de teste ou nome manual), mantém o valor ou None,
-        # mas o requisito pede para printar o ID da tabela traders.
-        # Se não achar, vai ficar None.
-
         # Helper to convert to float
         def _to_float(val: str) -> Optional[float]:
             if not val:
@@ -339,7 +411,7 @@ def create_novo_contrato_content(
             "fee_tax": _to_float(fee_tax_field.value),
             "energy_note_date": energy_note_date_field.value,
             "has_proinfa_discount": has_proinfa_cb.value,
-            # "financial_guarantee": financial_guarantee_cb.value, # Coluna não existe na tabela contracts (pertence a seasonalities)
+            # "financial_guarantee": financial_guarantee_cb.value, 
             "energy_source_type": {
                 "CONV": "CONVENCIONAL",
                 "I5": "I5",
@@ -362,24 +434,41 @@ def create_novo_contrato_content(
             "automatic_billing_released": automatic_billing_switch.value,
         }
 
-        print("[Novo Contrato] Dados do contrato para salvar:")
+        print(f"[{title_text}] Dados do contrato para salvar:")
         print(data)
 
         try:
-            create_record("contracts", data)
-            print("[Novo Contrato] Registro criado com sucesso.")
-            screen.page.snack_bar = ft.SnackBar(ft.Text("Contrato salvo com sucesso!"), bgcolor=ft.Colors.GREEN)
-            screen.page.snack_bar.open = True
+            if is_editing:
+                update_record("contracts", contract_id, data)
+                msg = "Contrato atualizado com sucesso!"
+            else:
+                create_record("contracts", data)
+                msg = "Contrato criado com sucesso!"
+            
+            print(f"[{title_text}] Sucesso.")
+            
+            snackbar = ft.SnackBar(
+                content=ft.Text(msg),
+                bgcolor=ft.Colors.GREEN_600,
+            )
+            screen.page.overlay.append(snackbar)
+            snackbar.open = True
             screen.page.update()
+            
             _go_back()
         except Exception as e:
-            print(f"[Novo Contrato] Erro ao salvar: {e}")
-            screen.page.snack_bar = ft.SnackBar(ft.Text(f"Erro ao salvar: {e}"), bgcolor=ft.Colors.RED)
-            screen.page.snack_bar.open = True
+            print(f"[{title_text}] Erro ao salvar: {e}")
+            
+            snackbar = ft.SnackBar(
+                content=ft.Text(f"Erro ao salvar: {e}"),
+                bgcolor=ft.Colors.RED_600,
+            )
+            screen.page.overlay.append(snackbar)
+            snackbar.open = True
             screen.page.update()
 
     def on_cancel(_: ft.ControlEvent) -> None:
-        print("[Novo Contrato] Operação cancelada pelo usuário")
+        print(f"[{title_text}] Operação cancelada pelo usuário")
         _go_back()
 
     button_width = 170
@@ -418,7 +507,7 @@ def create_novo_contrato_content(
         content=ft.Column(
             controls=[
                 ft.Text(
-                    "Novo Contrato",
+                    title_text,
                     size=18,
                     weight=ft.FontWeight.W_600,
                 ),
@@ -432,7 +521,7 @@ def create_novo_contrato_content(
         ),
     )
 
-    print("[Novo Contrato] Formulário construído, retornando card...")
+    print(f"[{title_text}] Formulário construído, retornando card...")
 
     return ft.Container(
         expand=True,

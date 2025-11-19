@@ -24,7 +24,12 @@ def _format_date(value: Any) -> str:
         return s
 
 
-def _create_contracts_table(contracts: list[Dict[str, Any]]) -> ft.Control:
+def _create_contracts_table(
+    contracts: list[Dict[str, Any]],
+    screen: Any,
+    buyer_value: str,
+    seller_value: str,
+) -> ft.Control:
     headers = [
         "Cód. Contrato",
         "Comprador",
@@ -112,6 +117,32 @@ def _create_contracts_table(contracts: list[Dict[str, Any]]) -> ft.Control:
         def make_on_click(action: str, contract_code: str):
             return lambda _: print(f"Ação {action} para contrato {contract_code}")
 
+        def make_sazo_action(contract_data):
+            return lambda _: screen.navigation.go(
+                "/comercializacao",
+                params={
+                    "submenu": "contratos",
+                    "contracts_view": "sazo",
+                    "contract_id": str(contract_data.get("id") or ""),
+                    "start_date": str(contract_data.get("contract_start_date") or ""),
+                    "end_date": str(contract_data.get("contract_end_date") or ""),
+                    "buyer": buyer_value,
+                    "seller": seller_value,
+                },
+            )
+
+        def make_edit_action(contract_data):
+            return lambda _: screen.navigation.go(
+                "/comercializacao",
+                params={
+                    "submenu": "contratos",
+                    "contracts_view": "new",
+                    "contract_id": str(contract_data.get("id") or ""),
+                    "buyer": buyer_value,
+                    "seller": seller_value,
+                },
+            )
+
         row = ft.Row(
             controls=[
                 data_cell(code, widths[0], idx),
@@ -125,14 +156,14 @@ def _create_contracts_table(contracts: list[Dict[str, Any]]) -> ft.Control:
                     "Editar contrato",
                     widths[6],
                     idx,
-                    make_on_click("editar", code),
+                    make_edit_action(c),
                 ),
                 action_button(
                     ft.Icons.CALENDAR_MONTH,
                     "Editar sazonalidade",
                     widths[7],
                     idx,
-                    make_on_click("sazonalidade", code),
+                    make_sazo_action(c),
                 ),
                 action_button(
                     ft.Icons.DELETE,
@@ -267,7 +298,7 @@ def create_contratos_content(
         alignment=ft.MainAxisAlignment.START,
     )
 
-    table = _create_contracts_table(filtered_contracts)
+    table = _create_contracts_table(filtered_contracts, screen, buyer_value, seller_value)
 
     return ft.Container(
         expand=True,
