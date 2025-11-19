@@ -1,10 +1,13 @@
 from typing import Any, Dict, Optional
+from datetime import datetime
+
 import flet as ft
 from screens import BaseScreen
 from scripts.comercializacao_service import (
     MONTH_LABELS,
     get_client_dashboard_data,
     list_contract_clients,
+    list_contracts_for_table,
 )
 
 
@@ -27,6 +30,8 @@ class ComercializacaoScreen(BaseScreen):
         energy_type = params.get("energy_type")
         submarket = params.get("submarket")
         contract_type = params.get("contract_type")
+        buyer_filter = params.get("buyer")
+        seller_filter = params.get("seller")
 
         return self._create_main_content(
             selected_submenu,
@@ -34,6 +39,8 @@ class ComercializacaoScreen(BaseScreen):
             energy_type,
             submarket,
             contract_type,
+            buyer_filter,
+            seller_filter,
         )
 
     # def create_footer(self) -> ft.Control:
@@ -62,6 +69,8 @@ class ComercializacaoScreen(BaseScreen):
         energy_type: Optional[str],
         submarket: Optional[str],
         contract_type: Optional[str],
+        buyer_filter: Optional[str],
+        seller_filter: Optional[str],
     ) -> ft.Control:
         """Cria o layout principal com submenu à esquerda e conteúdo à direita."""
         return ft.Container(
@@ -76,6 +85,8 @@ class ComercializacaoScreen(BaseScreen):
                         energy_type,
                         submarket,
                         contract_type,
+                        buyer_filter,
+                        seller_filter,
                     ),
                 ],
                 spacing=20,
@@ -89,7 +100,7 @@ class ComercializacaoScreen(BaseScreen):
     def _create_submenu_items(self) -> list[tuple[str, str, str]]:
         """Retorna a definição dos submenus da área de Comercialização."""
         return [
-            ("Visão", "visao", ft.Icons.INSIGHTS),
+            ("Portfólio", "visao", ft.Icons.INSIGHTS),
             ("Visão Geral", "visao_geral", ft.Icons.DASHBOARD),
             ("Fluxos", "fluxos", ft.Icons.TIMELINE),
             ("Contratos", "contratos", ft.Icons.DESCRIPTION),
@@ -166,6 +177,8 @@ class ComercializacaoScreen(BaseScreen):
         energy_type: Optional[str],
         submarket: Optional[str],
         contract_type: Optional[str],
+        buyer_filter: Optional[str],
+        seller_filter: Optional[str],
     ) -> ft.Control:
         """Seleciona o conteúdo de acordo com o submenu escolhido."""
         if selected_submenu == "visao":
@@ -180,7 +193,7 @@ class ComercializacaoScreen(BaseScreen):
         elif selected_submenu == "fluxos":
             inner = self._create_fluxos_content()
         elif selected_submenu == "contratos":
-            inner = self._create_contratos_content()
+            inner = self._create_contratos_content(buyer_filter, seller_filter)
         elif selected_submenu == "clientes":
             inner = self._create_clientes_content()
         elif selected_submenu == "produtos":
@@ -290,11 +303,16 @@ class ComercializacaoScreen(BaseScreen):
 
         dropdown_width = 220
 
+        # Restringe clientes a uma lista fixa, mas apenas para aqueles que
+        # existem na base retornada por list_contract_clients().
+        allowed_clients = {"NOVO COM", "MERX", "FORTLEV SOLAR"}
+        client_options_list = [c for c in clients if c in allowed_clients]
+
         client_dd = ft.Dropdown(
             label="Cliente",
             hint_text="Escolha um cliente...",
-            options=[ft.dropdown.Option(c) for c in clients],
-            value=selected_client,
+            options=[ft.dropdown.Option(c) for c in client_options_list],
+            value=selected_client if selected_client in client_options_list else None,
             width=dropdown_width,
         )
 
@@ -457,24 +475,58 @@ class ComercializacaoScreen(BaseScreen):
         lado, inspirado no exemplo de instructions/charts.py.
         """
         months = list(year_data.get("months", MONTH_LABELS))
-        buy = list(year_data.get("buy", []))
-        sell = list(year_data.get("sell", []))
+        buy_mwh = list(year_data.get("buy", []))
+        sell_mwh = list(year_data.get("sell", []))
 
         # Garante que as listas tenham pelo menos o tamanho de months
-        while len(buy) < len(months):
-            buy.append(0.0)
-        while len(sell) < len(months):
-            sell.append(0.0)
+        while len(buy_mwh) < len(months):
+            buy_mwh.append(0.0)
+        while len(sell_mwh) < len(months):
+            sell_mwh.append(0.0)
 
-        max_volume = max(max(buy, default=0.0), max(sell, default=0.0)) or 1.0
+        # Horas por mês para converter MWh -> MWm
+        hours_per_month = [
+            744.0,  # Jan
+            672.0,  # Fev
+            744.0,  # Mar
+            720.0,  # Abr
+            744.0,  # Mai
+            720.0,  # Jun
+            744.0,  # Jul
+            744.0,  # Ago
+            720.0,  # Set
+            744.0,  # Out
+            720.0,  # Nov
+            744.0,  # Dez
+        ]
+
+        buy_mwm: list[float] = []
+        sell_mwm: list[float] = []
+        diff_mwm: list[float] = []
+
+        for i in range(len(months)):
+            hours = hours_per_month[i] if i < len(hours_per_month) else 744.0
+            b = float(buy_mwh[i] or 0.0) / hours if hours > 0 else 0.0
+            s = float(sell_mwh[i] or 0.0) / hours if hours > 0 else 0.0
+            d = b - s
+            buy_mwm.append(b)
+            sell_mwm.append(s)
+            diff_mwm.append(d)
+
+        max_volume = max(
+            max((abs(v) for v in buy_mwm), default=0.0),
+            max((abs(v) for v in sell_mwm), default=0.0),
+            max((abs(v) for v in diff_mwm), default=0.0),
+        ) or 1.0
         max_y = max_volume * 1.2
 
         print(
-            "[ComercializacaoScreen] Ano",
+            "[ComercializacaoScreen] Ano (MWm)",
             year,
             {
-                "buy": buy,
-                "sell": sell,
+                "buy_mwm": buy_mwm,
+                "sell_mwm": sell_mwm,
+                "diff_mwm": diff_mwm,
             },
         )
 
@@ -483,24 +535,42 @@ class ComercializacaoScreen(BaseScreen):
 
         bar_groups: list[ft.BarChartGroup] = []
         for i, label in enumerate(months):
+            diff_value = diff_mwm[i]
+            diff_color = (
+                ft.Colors.RED_400 if diff_value < 0 else ft.Colors.AMBER_400
+            )
+            if diff_value > 0:
+                diff_label = "Sobra"
+            elif diff_value < 0:
+                diff_label = "Déficit"
+            else:
+                diff_label = "Diferença"
             bar_groups.append(
                 ft.BarChartGroup(
                     x=i,
                     bar_rods=[
                         ft.BarChartRod(
                             from_y=0,
-                            to_y=buy[i],
-                            width=12,
+                            to_y=buy_mwm[i],
+                            width=10,
                             color=ft.Colors.GREEN_400,
-                            tooltip=f"Compra: {buy[i]:.2f}",
+                            tooltip=f"Compra: {buy_mwm[i]:.2f} MWm",
                             border_radius=4,
                         ),
                         ft.BarChartRod(
                             from_y=0,
-                            to_y=sell[i],
-                            width=12,
+                            to_y=sell_mwm[i],
+                            width=10,
                             color=ft.Colors.BLUE_400,
-                            tooltip=f"Venda: {sell[i]:.2f}",
+                            tooltip=f"Venda: {sell_mwm[i]:.2f} MWm",
+                            border_radius=4,
+                        ),
+                        ft.BarChartRod(
+                            from_y=0,
+                            to_y=abs(diff_value),
+                            width=10,
+                            color=diff_color,
+                            tooltip=f"{diff_label} - {diff_value:.2f} MWm",
                             border_radius=4,
                         ),
                     ],
@@ -515,7 +585,7 @@ class ComercializacaoScreen(BaseScreen):
             border=ft.border.all(1, ft.Colors.GREY_300),
             left_axis=ft.ChartAxis(
                 labels_size=40,
-                title=ft.Text("Volume (MWh)", size=12, weight=ft.FontWeight.BOLD),
+                title=ft.Text("Volume (MWm)", size=12, weight=ft.FontWeight.BOLD),
                 title_size=30,
             ),
             bottom_axis=ft.ChartAxis(
@@ -545,43 +615,83 @@ class ComercializacaoScreen(BaseScreen):
                 return f"{label} - Preço médio: N/A"
             return f"{label} - Preço médio: R$ {value:.2f}/MWh"
 
+        # Determina comportamento médio da diferença para legenda
+        has_positive_diff = any(d > 0 for d in diff_mwm)
+        has_negative_diff = any(d < 0 for d in diff_mwm)
+
+        diff_legend_items: list[ft.Control] = []
+        if has_positive_diff:
+            diff_legend_items.append(
+                ft.Row(
+                    controls=[
+                        ft.Container(
+                            width=16,
+                            height=16,
+                            bgcolor=ft.Colors.AMBER_400,
+                            border_radius=4,
+                        ),
+                        ft.Text("Sobra", size=11, color=ft.Colors.GREY_700),
+                    ],
+                    spacing=6,
+                )
+            )
+        if has_negative_diff:
+            diff_legend_items.append(
+                ft.Row(
+                    controls=[
+                        ft.Container(
+                            width=16,
+                            height=16,
+                            bgcolor=ft.Colors.RED_400,
+                            border_radius=4,
+                        ),
+                        ft.Text("Déficit", size=11, color=ft.Colors.GREY_700),
+                    ],
+                    spacing=6,
+                )
+            )
+
+        legend_controls: list[ft.Control] = [
+            ft.Row(
+                controls=[
+                    ft.Container(
+                        width=16,
+                        height=16,
+                        bgcolor=ft.Colors.GREEN_400,
+                        border_radius=4,
+                    ),
+                    ft.Text(
+                        _format_price("Compra", buy_avg_price),
+                        size=11,
+                        color=ft.Colors.GREY_700,
+                    ),
+                ],
+                spacing=6,
+            ),
+            ft.Row(
+                controls=[
+                    ft.Container(
+                        width=16,
+                        height=16,
+                        bgcolor=ft.Colors.BLUE_400,
+                        border_radius=4,
+                    ),
+                    ft.Text(
+                        _format_price("Venda", sell_avg_price),
+                        size=11,
+                        color=ft.Colors.GREY_700,
+                    ),
+                ],
+                spacing=6,
+            ),
+        ]
+
+        legend_controls.extend(diff_legend_items)
+
         legend = ft.Row(
-            controls=[
-                ft.Row(
-                    controls=[
-                        ft.Container(
-                            width=16,
-                            height=16,
-                            bgcolor=ft.Colors.GREEN_400,
-                            border_radius=4,
-                        ),
-                        ft.Text(
-                            _format_price("Compra", buy_avg_price),
-                            size=11,
-                            color=ft.Colors.GREY_700,
-                        ),
-                    ],
-                    spacing=6,
-                ),
-                ft.Row(
-                    controls=[
-                        ft.Container(
-                            width=16,
-                            height=16,
-                            bgcolor=ft.Colors.BLUE_400,
-                            border_radius=4,
-                        ),
-                        ft.Text(
-                            _format_price("Venda", sell_avg_price),
-                            size=11,
-                            color=ft.Colors.GREY_700,
-                        ),
-                    ],
-                    spacing=6,
-                ),
-            ],
+            controls=legend_controls,
             spacing=20,
-            alignment=ft.MainAxisAlignment.CENTER
+            alignment=ft.MainAxisAlignment.CENTER,
         )
 
         return ft.Container(
@@ -765,10 +875,120 @@ class ComercializacaoScreen(BaseScreen):
             ),
         )
 
-    def _create_contratos_content(self) -> ft.Control:
-        return self._create_placeholder_section(
-            "Contratos",
-            "Cadastro e gestão de contratos de comercialização.",
+    def _create_contratos_content(
+        self,
+        buyer_filter: Optional[str],
+        seller_filter: Optional[str],
+    ) -> ft.Control:
+        """Conteúdo da aba Contratos com tabela em container e scroll."""
+        buyer_value = (buyer_filter or "").strip()
+        seller_value = (seller_filter or "").strip()
+
+        contracts = list_contracts_for_table()
+
+        # Aplica filtros em memória; como recarregamos a tela a cada alteração
+        # dos campos, a consulta ao serviço sempre será refeita.
+        def matches_filters(c: Dict[str, Any]) -> bool:
+            contractor = str(c.get("contractor") or "")
+            seller = str(c.get("service_provider") or "")
+            if buyer_value and buyer_value.lower() not in contractor.lower():
+                return False
+            if seller_value and seller_value.lower() not in seller.lower():
+                return False
+            return True
+
+        filtered_contracts = [c for c in contracts if matches_filters(c)]
+
+        buyer_field = ft.TextField(
+            label="Comprador",
+            prefix_icon=ft.Icons.SEARCH,
+            width=260,
+            value=buyer_value,
+        )
+
+        seller_field = ft.TextField(
+            label="Vendedor",
+            prefix_icon=ft.Icons.SEARCH,
+            width=260,
+            value=seller_value,
+        )
+
+        def apply_filters(_: ft.ControlEvent) -> None:
+            self.navigation.go(
+                "/comercializacao",
+                params={
+                    "submenu": "contratos",
+                    "buyer": buyer_field.value,
+                    "seller": seller_field.value,
+                },
+            )
+
+        # Enter nos campos dispara a mesma ação do botão Pesquisar
+        buyer_field.on_submit = apply_filters
+        seller_field.on_submit = apply_filters
+
+        filters_row = ft.Row(
+            controls=[buyer_field, seller_field],
+            spacing=16,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        button_width = 170
+        button_height = 40
+
+        search_button = ft.ElevatedButton(
+            text="Pesquisar",
+            icon=ft.Icons.SEARCH,
+            bgcolor=ft.Colors.BLUE_600,
+            color=ft.Colors.WHITE,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=6),
+                padding=ft.padding.symmetric(horizontal=0, vertical=0),
+            ),
+            width=button_width,
+            height=button_height,
+            on_click=apply_filters,
+        )
+
+        new_contract_button = ft.ElevatedButton(
+            text="Novo Contrato",
+            icon=ft.Icons.ADD,
+            bgcolor=ft.Colors.BLUE_600,
+            color=ft.Colors.WHITE,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=6),
+                padding=ft.padding.symmetric(horizontal=0, vertical=0),
+            ),
+            width=button_width,
+            height=button_height,
+            on_click=lambda _: print("Novo contrato - ação ainda não implementada"),
+        )
+
+        actions_row = ft.Row(
+            controls=[
+                search_button,
+                new_contract_button,
+            ],
+            spacing=12,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        table = self._create_contracts_table(filtered_contracts)
+
+        return ft.Container(
+            expand=True,
+            padding=20,
+            content=ft.Column(
+                controls=[
+                    filters_row,
+                    ft.Container(height=12),
+                    actions_row,
+                    ft.Container(height=16),
+                    table,
+                ],
+                spacing=6,
+                alignment=ft.MainAxisAlignment.START,
+            ),
         )
 
     def _create_clientes_content(self) -> ft.Control:
@@ -781,6 +1001,165 @@ class ComercializacaoScreen(BaseScreen):
         return self._create_placeholder_section(
             "Produtos",
             "Catálogo de produtos e estruturas comerciais.",
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers para tabela de contratos
+    # ------------------------------------------------------------------
+
+    def _format_date(self, value: Any) -> str:
+        """Formata datas ISO/DateTime como dd/mm/aaaa."""
+        if value is None:
+            return "-"
+        s = str(value)
+        if not s:
+            return "-"
+        try:
+            # Tenta parse ISO completo
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return dt.strftime("%d/%m/%Y")
+        except Exception:
+            # Fallback em caso de formato inesperado
+            if len(s) >= 10:
+                return f"{s[8:10]}/{s[5:7]}/{s[0:4]}"
+            return s
+
+    def _create_contracts_table(self, contracts: list[Dict[str, Any]]) -> ft.Control:
+        headers = [
+            "Cód. Contrato",
+            "Comprador",
+            "Vendedor",
+            "Energia",
+            "Início",
+            "Fim",
+            "Editar",
+            "Sazo",
+            "Excluir",
+        ]
+
+        widths = [130, 220, 220, 110, 110, 110, 80, 80, 80]
+
+        def header_cell(text: str, width: int) -> ft.Control:
+            return ft.Container(
+                content=ft.Text(
+                    text,
+                    size=13,
+                    weight=ft.FontWeight.BOLD,
+                    color=ft.Colors.WHITE,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                width=width,
+                height=44,
+                bgcolor=ft.Colors.BLUE_700,
+                padding=10,
+                alignment=ft.alignment.center,
+                border=ft.border.all(1, ft.Colors.BLUE_900),
+            )
+
+        def data_cell(text: str, width: int, row_index: int) -> ft.Control:
+            bg_color = ft.Colors.WHITE if row_index % 2 == 0 else ft.Colors.GREY_50
+            return ft.Container(
+                content=ft.Text(
+                    text,
+                    size=12,
+                    color=ft.Colors.GREY_900,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                width=width,
+                height=40,
+                bgcolor=bg_color,
+                padding=10,
+                alignment=ft.alignment.center,
+                border=ft.border.all(1, ft.Colors.GREY_300),
+            )
+
+        def action_button(
+            icon: str,
+            tooltip: str,
+            width: int,
+            row_index: int,
+            on_click,
+        ) -> ft.Control:
+            bg_color = ft.Colors.WHITE if row_index % 2 == 0 else ft.Colors.GREY_50
+            return ft.Container(
+                content=ft.IconButton(
+                    icon=icon,
+                    icon_color=ft.Colors.BLACK,
+                    tooltip=tooltip,
+                    on_click=on_click,
+                ),
+                width=width,
+                height=40,
+                bgcolor=bg_color,
+                alignment=ft.alignment.center,
+                border=ft.border.all(1, ft.Colors.GREY_300),
+            )
+
+        header_row = ft.Row(
+            controls=[header_cell(headers[i], widths[i]) for i in range(len(headers))],
+            spacing=0,
+        )
+
+        data_rows: list[ft.Control] = []
+        for idx, c in enumerate(contracts):
+            code = str(c.get("contract_code") or "-")
+            contractor = str(c.get("contractor") or "-")
+            seller = str(c.get("service_provider") or "-")
+            energy = str(c.get("energy_source_type") or "-")
+            start = self._format_date(c.get("contract_start_date"))
+            end = self._format_date(c.get("contract_end_date"))
+
+            def make_on_click(action: str, contract_code: str):
+                return lambda _: print(f"Ação {action} para contrato {contract_code}")
+
+            row = ft.Row(
+                controls=[
+                    data_cell(code, widths[0], idx),
+                    data_cell(contractor, widths[1], idx),
+                    data_cell(seller, widths[2], idx),
+                    data_cell(energy, widths[3], idx),
+                    data_cell(start, widths[4], idx),
+                    data_cell(end, widths[5], idx),
+                    action_button(
+                        ft.Icons.EDIT,
+                        "Editar contrato",
+                        widths[6],
+                        idx,
+                        make_on_click("editar", code),
+                    ),
+                    action_button(
+                        ft.Icons.CALENDAR_MONTH,
+                        "Editar sazonalidade",
+                        widths[7],
+                        idx,
+                        make_on_click("sazonalidade", code),
+                    ),
+                    action_button(
+                        ft.Icons.DELETE,
+                        "Excluir contrato",
+                        widths[8],
+                        idx,
+                        make_on_click("excluir", code),
+                    ),
+                ],
+                spacing=0,
+            )
+            data_rows.append(row)
+
+        total_width = sum(widths)
+
+        table_column = ft.Column(
+            controls=[header_row] + data_rows,
+            spacing=0,
+            scroll=ft.ScrollMode.AUTO,
+        )
+
+        return ft.Container(
+            content=table_column,
+            width=total_width,
+            border=ft.border.all(1, ft.Colors.GREY_300),
+            border_radius=8,
+            bgcolor=ft.Colors.WHITE,
         )
 
     def _create_fluxo_chart_card(

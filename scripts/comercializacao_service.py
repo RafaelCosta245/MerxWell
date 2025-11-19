@@ -90,6 +90,23 @@ def _parse_year_from_date(value: Any) -> int | None:
             return None
 
 
+def list_contracts_for_table() -> List[Dict[str, Any]]:
+    """Retorna a lista de contratos com campos usados na tela de contratos.
+
+    Campos retornados por item:
+    - contract_code
+    - contractor (comprador)
+    - service_provider (vendedor)
+    - energy_source_type (energia)
+    - contract_start_date (início)
+    - contract_end_date (fim)
+    """
+    records = read_records("contracts", filters=None)
+    # Ordena por código de contrato para manter consistência visual
+    records.sort(key=lambda r: str(r.get("contract_code") or ""))
+    return records
+
+
 def get_client_dashboard_data(
     client_name: str,
     energy_type: str | None = None,
