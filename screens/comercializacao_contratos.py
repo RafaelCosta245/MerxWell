@@ -247,7 +247,15 @@ def create_contratos_content(
         ),
         width=button_width,
         height=button_height,
-        on_click=lambda _: print("Novo contrato - ação ainda não implementada"),
+        on_click=lambda _: screen.navigation.go(
+            "/comercializacao",
+            params={
+                "submenu": "contratos",
+                "contracts_view": "new",
+                "buyer": buyer_field.value,
+                "seller": seller_field.value,
+            },
+        ),
     )
 
     actions_row = ft.Row(

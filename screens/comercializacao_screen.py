@@ -5,6 +5,7 @@ import flet as ft
 from screens import BaseScreen
 from screens import (
     comercializacao_contratos,
+    comercializacao_novo_contrato,
     comercializacao_portfolio,
     comercializacao_visao_geral,
     comercializacao_fluxos,
@@ -39,6 +40,7 @@ class ComercializacaoScreen(BaseScreen):
         contract_type = params.get("contract_type")
         buyer_filter = params.get("buyer")
         seller_filter = params.get("seller")
+        contracts_view = params.get("contracts_view")
 
         return self._create_main_content(
             selected_submenu,
@@ -48,6 +50,7 @@ class ComercializacaoScreen(BaseScreen):
             contract_type,
             buyer_filter,
             seller_filter,
+            contracts_view,
         )
 
     # def create_footer(self) -> ft.Control:
@@ -78,6 +81,7 @@ class ComercializacaoScreen(BaseScreen):
         contract_type: Optional[str],
         buyer_filter: Optional[str],
         seller_filter: Optional[str],
+        contracts_view: Optional[str],
     ) -> ft.Control:
         """Cria o layout principal com submenu à esquerda e conteúdo à direita."""
         return ft.Container(
@@ -94,6 +98,7 @@ class ComercializacaoScreen(BaseScreen):
                         contract_type,
                         buyer_filter,
                         seller_filter,
+                        contracts_view,
                     ),
                 ],
                 spacing=20,
@@ -186,8 +191,16 @@ class ComercializacaoScreen(BaseScreen):
         contract_type: Optional[str],
         buyer_filter: Optional[str],
         seller_filter: Optional[str],
+        contracts_view: Optional[str],
     ) -> ft.Control:
         """Seleciona o conteúdo de acordo com o submenu escolhido."""
+        print(
+            "[ComercializacaoScreen] _create_subcontent_area",
+            {
+                "selected_submenu": selected_submenu,
+                "contracts_view": contracts_view,
+            },
+        )
         if selected_submenu == "visao":
             inner = comercializacao_portfolio.create_portfolio_content(
                 self,
@@ -201,11 +214,23 @@ class ComercializacaoScreen(BaseScreen):
         elif selected_submenu == "fluxos":
             inner = comercializacao_fluxos.create_fluxos_content(self)
         elif selected_submenu == "contratos":
-            inner = comercializacao_contratos.create_contratos_content(
-                self,
-                buyer_filter,
-                seller_filter,
-            )
+            if contracts_view == "new":
+                print("[ComercializacaoScreen] Abrindo formulário de novo contrato")
+                inner = comercializacao_novo_contrato.create_novo_contrato_content(
+                    self,
+                    buyer_filter,
+                    seller_filter,
+                )
+                # Para isolar o problema de tela em branco, retornamos o
+                # formulário diretamente, sem envolver no wrapper de scroll.
+                return inner
+            else:
+                print("[ComercializacaoScreen] Abrindo listagem de contratos")
+                inner = comercializacao_contratos.create_contratos_content(
+                    self,
+                    buyer_filter,
+                    seller_filter,
+                )
         elif selected_submenu == "clientes":
             inner = comercializacao_clientes.create_clientes_content(self)
         elif selected_submenu == "produtos":
