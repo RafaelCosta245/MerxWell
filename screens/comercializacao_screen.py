@@ -3,11 +3,18 @@ from datetime import datetime
 
 import flet as ft
 from screens import BaseScreen
+from screens import (
+    comercializacao_contratos,
+    comercializacao_portfolio,
+    comercializacao_visao_geral,
+    comercializacao_fluxos,
+    comercializacao_clientes,
+    comercializacao_produtos,
+)
 from scripts.comercializacao_service import (
     MONTH_LABELS,
     get_client_dashboard_data,
     list_contract_clients,
-    list_contracts_for_table,
 )
 
 
@@ -182,22 +189,27 @@ class ComercializacaoScreen(BaseScreen):
     ) -> ft.Control:
         """Seleciona o conteúdo de acordo com o submenu escolhido."""
         if selected_submenu == "visao":
-            inner = self._create_visao_dashboard(
+            inner = comercializacao_portfolio.create_portfolio_content(
+                self,
                 selected_client,
                 energy_type,
                 submarket,
                 contract_type,
             )
         elif selected_submenu == "visao_geral":
-            inner = self._create_dashboard_content()
+            inner = comercializacao_visao_geral.create_visao_geral_content(self)
         elif selected_submenu == "fluxos":
-            inner = self._create_fluxos_content()
+            inner = comercializacao_fluxos.create_fluxos_content(self)
         elif selected_submenu == "contratos":
-            inner = self._create_contratos_content(buyer_filter, seller_filter)
+            inner = comercializacao_contratos.create_contratos_content(
+                self,
+                buyer_filter,
+                seller_filter,
+            )
         elif selected_submenu == "clientes":
-            inner = self._create_clientes_content()
+            inner = comercializacao_clientes.create_clientes_content(self)
         elif selected_submenu == "produtos":
-            inner = self._create_produtos_content()
+            inner = comercializacao_produtos.create_produtos_content(self)
         else:
             # Fallback
             inner = self._create_dashboard_content()
@@ -871,122 +883,6 @@ class ComercializacaoScreen(BaseScreen):
             content=ft.Column(
                 controls=chart_rows,
                 spacing=16,
-                alignment=ft.MainAxisAlignment.START,
-            ),
-        )
-
-    def _create_contratos_content(
-        self,
-        buyer_filter: Optional[str],
-        seller_filter: Optional[str],
-    ) -> ft.Control:
-        """Conteúdo da aba Contratos com tabela em container e scroll."""
-        buyer_value = (buyer_filter or "").strip()
-        seller_value = (seller_filter or "").strip()
-
-        contracts = list_contracts_for_table()
-
-        # Aplica filtros em memória; como recarregamos a tela a cada alteração
-        # dos campos, a consulta ao serviço sempre será refeita.
-        def matches_filters(c: Dict[str, Any]) -> bool:
-            contractor = str(c.get("contractor") or "")
-            seller = str(c.get("service_provider") or "")
-            if buyer_value and buyer_value.lower() not in contractor.lower():
-                return False
-            if seller_value and seller_value.lower() not in seller.lower():
-                return False
-            return True
-
-        filtered_contracts = [c for c in contracts if matches_filters(c)]
-
-        buyer_field = ft.TextField(
-            label="Comprador",
-            prefix_icon=ft.Icons.SEARCH,
-            width=260,
-            value=buyer_value,
-        )
-
-        seller_field = ft.TextField(
-            label="Vendedor",
-            prefix_icon=ft.Icons.SEARCH,
-            width=260,
-            value=seller_value,
-        )
-
-        def apply_filters(_: ft.ControlEvent) -> None:
-            self.navigation.go(
-                "/comercializacao",
-                params={
-                    "submenu": "contratos",
-                    "buyer": buyer_field.value,
-                    "seller": seller_field.value,
-                },
-            )
-
-        # Enter nos campos dispara a mesma ação do botão Pesquisar
-        buyer_field.on_submit = apply_filters
-        seller_field.on_submit = apply_filters
-
-        filters_row = ft.Row(
-            controls=[buyer_field, seller_field],
-            spacing=16,
-            alignment=ft.MainAxisAlignment.START,
-        )
-
-        button_width = 170
-        button_height = 40
-
-        search_button = ft.ElevatedButton(
-            text="Pesquisar",
-            icon=ft.Icons.SEARCH,
-            bgcolor=ft.Colors.BLUE_600,
-            color=ft.Colors.WHITE,
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=6),
-                padding=ft.padding.symmetric(horizontal=0, vertical=0),
-            ),
-            width=button_width,
-            height=button_height,
-            on_click=apply_filters,
-        )
-
-        new_contract_button = ft.ElevatedButton(
-            text="Novo Contrato",
-            icon=ft.Icons.ADD,
-            bgcolor=ft.Colors.BLUE_600,
-            color=ft.Colors.WHITE,
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=6),
-                padding=ft.padding.symmetric(horizontal=0, vertical=0),
-            ),
-            width=button_width,
-            height=button_height,
-            on_click=lambda _: print("Novo contrato - ação ainda não implementada"),
-        )
-
-        actions_row = ft.Row(
-            controls=[
-                search_button,
-                new_contract_button,
-            ],
-            spacing=12,
-            alignment=ft.MainAxisAlignment.START,
-        )
-
-        table = self._create_contracts_table(filtered_contracts)
-
-        return ft.Container(
-            expand=True,
-            padding=20,
-            content=ft.Column(
-                controls=[
-                    filters_row,
-                    ft.Container(height=12),
-                    actions_row,
-                    ft.Container(height=16),
-                    table,
-                ],
-                spacing=6,
                 alignment=ft.MainAxisAlignment.START,
             ),
         )
