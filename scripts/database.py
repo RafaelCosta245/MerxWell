@@ -150,3 +150,17 @@ def delete_record(table: str, record_id: Any) -> None:
             raise DatabaseError(str(response.error))
     except Exception as exc:  # pragma: no cover
         raise DatabaseError(f"Erro ao excluir registro em {table}: {exc}") from exc
+
+
+def delete_records(table: str, filters: Dict[str, Any]) -> None:
+    """Remove registros de uma tabela com base em filtros."""
+    client = _ensure_primary()
+    try:
+        query = client.table(table).delete()
+        for key, value in filters.items():
+            query = query.eq(key, value)
+        response = query.execute()
+        if getattr(response, "error", None):
+            raise DatabaseError(str(response.error))
+    except Exception as exc:  # pragma: no cover
+        raise DatabaseError(f"Erro ao excluir registros em {table}: {exc}") from exc

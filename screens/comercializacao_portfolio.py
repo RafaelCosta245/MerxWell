@@ -45,7 +45,7 @@ def _create_filters_row(
 ) -> tuple[ft.Control, Dict[str, Optional[str]]]:
     dropdown_width = 220
 
-    allowed_clients = {"NOVO COM", "MERX", "FORTLEV SOLAR"}
+    allowed_clients = {"NOVO COM", "MERX", "FORTLEV SOLAR COM"}
     client_options_list = [c for c in clients if c in allowed_clients]
 
     client_dd = ft.Dropdown(

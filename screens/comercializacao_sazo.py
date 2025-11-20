@@ -481,6 +481,7 @@ def create_sazo_content(screen: Any, contract_id: str, start_date: Any, end_date
         border=ft.border.all(1, ft.Colors.GREY_300),
         border_radius=8,
         padding=10,
+        #alignment=ft.MainAxisAlignment.START,
     )
     
     # Wrapper para scroll horizontal
@@ -533,7 +534,7 @@ def create_sazo_content(screen: Any, contract_id: str, start_date: Any, end_date
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 ),
-                ft.Divider(),
+                #ft.Divider(),
                 # Área da tabela com scroll
                 scroll_horizontal,
             ],

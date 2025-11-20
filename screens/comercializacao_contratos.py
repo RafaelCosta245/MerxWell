@@ -4,6 +4,7 @@ from datetime import datetime
 import flet as ft
 
 from scripts.comercializacao_service import list_contracts_for_table
+from scripts.database import delete_records
 
 
 def _format_date(value: Any) -> str:
@@ -42,7 +43,7 @@ def _create_contracts_table(
         "Excluir",
     ]
 
-    widths = [130, 220, 220, 110, 110, 110, 80, 80, 80]
+    widths = [200, 220, 220, 150, 110, 110, 80, 80, 80]
 
     def header_cell(text: str, width: int) -> ft.Control:
         return ft.Container(
@@ -114,34 +115,103 @@ def _create_contracts_table(
         start = _format_date(c.get("contract_start_date"))
         end = _format_date(c.get("contract_end_date"))
 
-        def make_on_click(action: str, contract_code: str):
-            return lambda _: print(f"Ação {action} para contrato {contract_code}")
-
         def make_sazo_action(contract_data):
-            return lambda _: screen.navigation.go(
-                "/comercializacao",
-                params={
-                    "submenu": "contratos",
-                    "contracts_view": "sazo",
-                    "contract_id": str(contract_data.get("id") or ""),
-                    "start_date": str(contract_data.get("contract_start_date") or ""),
-                    "end_date": str(contract_data.get("contract_end_date") or ""),
-                    "buyer": buyer_value,
-                    "seller": seller_value,
-                },
-            )
+            def handler(_):
+                print(f"DEBUG: Sazo clicked for {contract_data.get('id')}")
+                screen.navigation.go(
+                    "/comercializacao",
+                    params={
+                        "submenu": "contratos",
+                        "contracts_view": "sazo",
+                        "contract_id": str(contract_data.get("id") or ""),
+                        "start_date": str(contract_data.get("contract_start_date") or ""),
+                        "end_date": str(contract_data.get("contract_end_date") or ""),
+                        "buyer": buyer_value,
+                        "seller": seller_value,
+                    },
+                )
+            return handler
 
         def make_edit_action(contract_data):
-            return lambda _: screen.navigation.go(
-                "/comercializacao",
-                params={
-                    "submenu": "contratos",
-                    "contracts_view": "new",
-                    "contract_id": str(contract_data.get("id") or ""),
-                    "buyer": buyer_value,
-                    "seller": seller_value,
-                },
+            def handler(_):
+                print(f"DEBUG: Edit clicked for {contract_data.get('id')}")
+                screen.navigation.go(
+                    "/comercializacao",
+                    params={
+                        "submenu": "contratos",
+                        "contracts_view": "new",
+                        "contract_id": str(contract_data.get("id") or ""),
+                        "buyer": buyer_value,
+                        "seller": seller_value,
+                    },
+                )
+            return handler
+
+        def delete_contract(contract_id_val):
+            print(f"DEBUG: delete_contract called for {contract_id_val}")
+            
+            def on_confirm_delete(e):
+                print("DEBUG: on_confirm_delete called")
+                try:
+                    # 1. Excluir sazonalidades vinculadas
+                    delete_records("contracts_seasonalities", {"contract_id": contract_id_val})
+                    # 2. Excluir o contrato
+                    delete_records("contracts", {"id": contract_id_val})
+                    
+                    # Fechar dialog
+                    screen.page.close(dlg)
+                    
+                    # Feedback
+                    snackbar = ft.SnackBar(
+                        content=ft.Text("✅ Contrato e dados vinculados excluídos com sucesso!"),
+                        bgcolor=ft.Colors.GREEN_600,
+                    )
+                    screen.page.overlay.append(snackbar)
+                    snackbar.open = True
+                    screen.page.update()
+                    
+                    # Recarregar a página
+                    screen.navigation.go(
+                        "/comercializacao",
+                        params={
+                            "submenu": "contratos",
+                            "buyer": buyer_value,
+                            "seller": seller_value,
+                        },
+                    )
+                    
+                except Exception as ex:
+                    screen.page.close(dlg)
+                    print(f"Erro ao excluir contrato: {ex}")
+                    snackbar = ft.SnackBar(
+                        content=ft.Text(f"⚠ Erro ao excluir: {ex}"),
+                        bgcolor=ft.Colors.RED_600,
+                    )
+                    screen.page.overlay.append(snackbar)
+                    snackbar.open = True
+                    screen.page.update()
+
+            # Criar e abrir dialog de confirmação
+            dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Confirmar Exclusão"),
+                content=ft.Text(
+                    "Tem certeza que deseja excluir este contrato?\n\n"
+                    "⚠ ATENÇÃO: Essa ação excluirá TODOS os dados do contrato, "
+                    "incluindo sazonalidades e registros financeiros.\n"
+                    "Essa ação é IRREVERSÍVEL.",
+                ),
+                actions=[
+                    ft.TextButton("Cancelar", on_click=lambda e: screen.page.close(dlg)),
+                    ft.TextButton(
+                        "Excluir Definitivamente",
+                        on_click=on_confirm_delete,
+                        style=ft.ButtonStyle(color=ft.Colors.RED_600),
+                    ),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
             )
+            screen.page.open(dlg)
 
         row = ft.Row(
             controls=[
@@ -170,7 +240,7 @@ def _create_contracts_table(
                     "Excluir contrato",
                     widths[8],
                     idx,
-                    make_on_click("excluir", code),
+                    lambda _: delete_contract(str(c.get("id") or "")),
                 ),
             ],
             spacing=0,
@@ -309,7 +379,10 @@ def create_contratos_content(
                 ft.Container(height=12),
                 actions_row,
                 ft.Container(height=16),
-                table,
+                ft.Row(
+                    controls=[table],
+                    scroll=ft.ScrollMode.ALWAYS,
+                ),
             ],
             spacing=6,
             alignment=ft.MainAxisAlignment.START,

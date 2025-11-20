@@ -12,6 +12,8 @@ from screens import (
     comercializacao_clientes,
     comercializacao_produtos,
     comercializacao_sazo,
+    comercializacao_precos,
+    comercializacao_novo_preco,
 )
 from scripts.comercializacao_service import (
     MONTH_LABELS,
@@ -45,6 +47,7 @@ class ComercializacaoScreen(BaseScreen):
         contract_id = params.get("contract_id")
         start_date = params.get("start_date")
         end_date = params.get("end_date")
+        precos_view = params.get("precos_view")
 
         return self._create_main_content(
             selected_submenu,
@@ -58,6 +61,7 @@ class ComercializacaoScreen(BaseScreen):
             contract_id,
             start_date,
             end_date,
+            precos_view,
         )
 
     # def create_footer(self) -> ft.Control:
@@ -92,6 +96,7 @@ class ComercializacaoScreen(BaseScreen):
         contract_id: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        precos_view: Optional[str] = None,
     ) -> ft.Control:
         """Cria o layout principal com submenu à esquerda e conteúdo à direita."""
         return ft.Container(
@@ -112,6 +117,7 @@ class ComercializacaoScreen(BaseScreen):
                         contract_id,
                         start_date,
                         end_date,
+                        precos_view,
                     ),
                 ],
                 spacing=20,
@@ -129,7 +135,7 @@ class ComercializacaoScreen(BaseScreen):
             ("Visão Geral", "visao_geral", ft.Icons.DASHBOARD),
             ("Fluxos", "fluxos", ft.Icons.TIMELINE),
             ("Contratos", "contratos", ft.Icons.DESCRIPTION),
-            ("Clientes", "clientes", ft.Icons.PEOPLE),
+            ("Preços", "precos", ft.Icons.ATTACH_MONEY),
             ("Produtos", "produtos", ft.Icons.SHOPPING_BAG),
         ]
 
@@ -208,6 +214,7 @@ class ComercializacaoScreen(BaseScreen):
         contract_id: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        precos_view: Optional[str] = None,
     ) -> ft.Control:
         """Seleciona o conteúdo de acordo com o submenu escolhido."""
         print(
@@ -215,6 +222,7 @@ class ComercializacaoScreen(BaseScreen):
             {
                 "selected_submenu": selected_submenu,
                 "contracts_view": contracts_view,
+                "precos_view": precos_view,
             },
         )
         if selected_submenu == "visao":
@@ -258,8 +266,13 @@ class ComercializacaoScreen(BaseScreen):
                     buyer_filter,
                     seller_filter,
                 )
-        elif selected_submenu == "clientes":
-            inner = comercializacao_clientes.create_clientes_content(self)
+        elif selected_submenu == "precos":
+            if precos_view == "new":
+                print("[ComercializacaoScreen] Abrindo formulário de novo preço")
+                inner = comercializacao_novo_preco.create_novo_preco_content(self)
+                return inner
+            else:
+                inner = comercializacao_precos.create_precos_content(self)
         elif selected_submenu == "produtos":
             inner = comercializacao_produtos.create_produtos_content(self)
         else:
