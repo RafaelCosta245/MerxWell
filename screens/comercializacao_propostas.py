@@ -1,32 +1,8 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from datetime import datetime
 
 import flet as ft
-
-# Mock data for proposals - eventually this will come from the database
-MOCK_PROPOSALS = [
-    {
-        "id": "1",
-        "buyer": "Empresa A",
-        "seller": "Empresa B",
-        "date": "2023-10-27",
-        "status": "Em Aberto",
-    },
-    {
-        "id": "2",
-        "buyer": "Indústria X",
-        "seller": "Comercializadora Y",
-        "date": "2023-11-15",
-        "status": "Fechado",
-    },
-    {
-        "id": "3",
-        "buyer": "Cliente Z",
-        "seller": "Fornecedor W",
-        "date": "2023-12-01",
-        "status": "Cancelado",
-    },
-]
+from scripts.database import read_records
 
 def _format_date(value: Any) -> str:
     """Formata datas ISO/DateTime como dd/mm/aaaa."""
@@ -51,7 +27,6 @@ def _create_proposals_table(
     screen: Any,
 ) -> ft.Control:
     headers = [
-        "ID",
         "Comprador",
         "Vendedor",
         "Data",
@@ -59,9 +34,10 @@ def _create_proposals_table(
         "Editar",
         "Gerar",
         "Excluir",
+        "Contrato",
     ]
 
-    widths = [60, 250, 250, 120, 120, 80, 80, 80]
+    widths = [250, 200, 120, 80, 70, 70, 70, 80]
 
     def header_cell(text: str, width: int) -> ft.Control:
         return ft.Container(
@@ -80,15 +56,10 @@ def _create_proposals_table(
             border=ft.border.all(1, ft.Colors.BLUE_900),
         )
 
-    def data_cell(text: str, width: int, row_index: int) -> ft.Control:
+    def data_cell(content: ft.Control, width: int, row_index: int) -> ft.Control:
         bg_color = ft.Colors.WHITE if row_index % 2 == 0 else ft.Colors.GREY_50
         return ft.Container(
-            content=ft.Text(
-                text,
-                size=12,
-                color=ft.Colors.GREY_900,
-                text_align=ft.TextAlign.CENTER,
-            ),
+            content=content,
             width=width,
             height=40,
             bgcolor=bg_color,
@@ -103,14 +74,16 @@ def _create_proposals_table(
         width: int,
         row_index: int,
         on_click,
+        icon_color: str = ft.Colors.BLACK,
     ) -> ft.Control:
         bg_color = ft.Colors.WHITE if row_index % 2 == 0 else ft.Colors.GREY_50
         return ft.Container(
             content=ft.IconButton(
                 icon=icon,
-                icon_color=ft.Colors.BLACK,
+                icon_color=icon_color,
                 tooltip=tooltip,
                 on_click=on_click,
+                icon_size=20,
             ),
             width=width,
             height=40,
@@ -126,11 +99,16 @@ def _create_proposals_table(
 
     data_rows: list[ft.Control] = []
     for idx, p in enumerate(proposals):
-        p_id = str(p.get("id") or "-")
-        buyer = str(p.get("buyer") or "-")
-        seller = str(p.get("seller") or "-")
-        date_str = _format_date(p.get("date"))
-        status = str(p.get("status") or "-")
+        buyer = str(p.get("customer_name") or "-")
+        seller = "-" # Placeholder as per instructions (DB doesn't have seller column yet)
+        date_str = _format_date(p.get("created_at"))
+        status_val = str(p.get("status") or "PENDING")
+
+        # Status Icon Logic
+        if status_val == "ACCEPTED":
+            status_icon = ft.Icon(ft.Icons.CHECK_CIRCLE, color=ft.Colors.GREEN, size=20, tooltip="Aceita")
+        else:
+            status_icon = ft.Icon(ft.Icons.HOURGLASS_EMPTY, color=ft.Colors.ORANGE, size=20, tooltip="Pendente")
 
         def make_edit_action(proposal_data):
             def handler(_):
@@ -149,35 +127,23 @@ def _create_proposals_table(
                 print(f"DEBUG: Delete clicked for proposal {proposal_data.get('id')}")
                 # Future implementation: Delete logic
             return handler
+            
+        def make_contract_action(proposal_data):
+            def handler(_):
+                print(f"DEBUG: Generate Contract clicked for proposal {proposal_data.get('id')}")
+                # Future implementation: Generate Contract PDF
+            return handler
 
         row = ft.Row(
             controls=[
-                data_cell(p_id, widths[0], idx),
-                data_cell(buyer, widths[1], idx),
-                data_cell(seller, widths[2], idx),
-                data_cell(date_str, widths[3], idx),
-                data_cell(status, widths[4], idx),
-                action_button(
-                    ft.Icons.EDIT,
-                    "Editar proposta",
-                    widths[5],
-                    idx,
-                    make_edit_action(p),
-                ),
-                action_button(
-                    ft.Icons.DESCRIPTION,
-                    "Gerar proposta",
-                    widths[6],
-                    idx,
-                    make_generate_action(p),
-                ),
-                action_button(
-                    ft.Icons.DELETE,
-                    "Excluir proposta",
-                    widths[7],
-                    idx,
-                    make_delete_action(p),
-                ),
+                data_cell(ft.Text(buyer, size=12, color=ft.Colors.GREY_900, text_align=ft.TextAlign.CENTER), widths[0], idx),
+                data_cell(ft.Text(seller, size=12, color=ft.Colors.GREY_900, text_align=ft.TextAlign.CENTER), widths[1], idx),
+                data_cell(ft.Text(date_str, size=12, color=ft.Colors.GREY_900, text_align=ft.TextAlign.CENTER), widths[2], idx),
+                data_cell(status_icon, widths[3], idx),
+                action_button(ft.Icons.EDIT, "Editar proposta", widths[4], idx, make_edit_action(p)),
+                action_button(ft.Icons.DESCRIPTION, "Gerar proposta", widths[5], idx, make_generate_action(p)),
+                action_button(ft.Icons.DELETE, "Excluir proposta", widths[6], idx, make_delete_action(p)),
+                action_button(ft.Icons.PICTURE_AS_PDF, "Gerar Contrato", widths[7], idx, make_contract_action(p), icon_color=ft.Colors.RED_700),
             ],
             spacing=0,
         )
@@ -203,26 +169,50 @@ def _create_proposals_table(
 def create_propostas_content(screen: Any) -> ft.Control:
     """Conteúdo da aba Propostas com tabela em container e scroll."""
     
-    # Mock filtering logic
+    # Container para a tabela que será atualizado
+    table_container = ft.Container()
+
+    def load_proposals(search_term: str = ""):
+        print(f"DEBUG: Loading proposals with search_term='{search_term}'")
+        try:
+            # Fetch all proposals (filtering in memory for partial match)
+            all_proposals = read_records("proposals")
+            
+            if search_term:
+                filtered_proposals = [
+                    p for p in all_proposals 
+                    if search_term.lower() in str(p.get("customer_name", "")).lower()
+                ]
+            else:
+                filtered_proposals = all_proposals
+            
+            # Sort by created_at desc (optional, but good for UX)
+            filtered_proposals.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+            table_container.content = _create_proposals_table(filtered_proposals, screen)
+            table_container.update()
+            
+        except Exception as e:
+            print(f"ERROR: Failed to load proposals: {e}")
+            table_container.content = ft.Text(f"Erro ao carregar propostas: {e}", color=ft.Colors.RED)
+            table_container.update()
+
     buyer_field = ft.TextField(
         label="Comprador",
         prefix_icon=ft.Icons.SEARCH,
         width=260,
+        on_submit=lambda e: load_proposals(e.control.value)
     )
 
     seller_field = ft.TextField(
         label="Vendedor",
         prefix_icon=ft.Icons.SEARCH,
         width=260,
+        visible=False # Hidden as requested
     )
 
     def apply_filters(_: ft.ControlEvent) -> None:
-        print(f"DEBUG: Filtering proposals by Buyer={buyer_field.value}, Seller={seller_field.value}")
-        # Future implementation: Filter MOCK_PROPOSALS or fetch from DB
-
-    # Enter nos campos dispara a mesma ação do botão Pesquisar
-    buyer_field.on_submit = apply_filters
-    seller_field.on_submit = apply_filters
+        load_proposals(buyer_field.value)
 
     filters_row = ft.Row(
         controls=[buyer_field, seller_field],
@@ -276,7 +266,21 @@ def create_propostas_content(screen: Any) -> ft.Control:
         alignment=ft.MainAxisAlignment.START,
     )
 
-    table = _create_proposals_table(MOCK_PROPOSALS, screen)
+    # Initial Load
+    # We need to use a threading timer or similar if we want to load immediately without blocking, 
+    # but since this is called during build, we can just call it or let the user search.
+    # Better to load initially.
+    # However, calling update() inside build() might be tricky if not added to page yet.
+    # We can return the container with initial data if we fetch synchronously here, 
+    # or use `did_mount` if we were in a Control class. 
+    # Since this is a function returning controls, we can just fetch and build.
+    
+    try:
+        initial_proposals = read_records("proposals")
+        initial_proposals.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        table_container.content = _create_proposals_table(initial_proposals, screen)
+    except Exception as e:
+        table_container.content = ft.Text(f"Erro ao carregar propostas: {e}", color=ft.Colors.RED)
 
     return ft.Container(
         expand=True,
@@ -290,7 +294,7 @@ def create_propostas_content(screen: Any) -> ft.Control:
                 actions_row,
                 ft.Container(height=16),
                 ft.Row(
-                    controls=[table],
+                    controls=[table_container],
                     scroll=ft.ScrollMode.ALWAYS,
                 ),
             ],
