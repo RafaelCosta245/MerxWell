@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional, List
 from datetime import datetime
 
 import flet as ft
-from scripts.database import read_records
+from scripts.database import read_records, create_record, delete_records
 
 def _format_date(value: Any) -> str:
     """Formata datas ISO/DateTime como dd/mm/aaaa."""
@@ -25,6 +25,7 @@ def _format_date(value: Any) -> str:
 def _create_proposals_table(
     proposals: list[Dict[str, Any]],
     screen: Any,
+    on_delete: Any, # Callback for delete action
 ) -> ft.Control:
     headers = [
         "Comprador",
@@ -100,7 +101,7 @@ def _create_proposals_table(
     data_rows: list[ft.Control] = []
     for idx, p in enumerate(proposals):
         buyer = str(p.get("customer_name") or "-")
-        seller = "-" # Placeholder as per instructions (DB doesn't have seller column yet)
+        seller = "-" # Placeholder
         date_str = _format_date(p.get("created_at"))
         status_val = str(p.get("status") or "PENDING")
 
@@ -121,12 +122,6 @@ def _create_proposals_table(
                 print(f"DEBUG: Generate proposal clicked for {proposal_data.get('id')}")
                 # Future implementation: Generate PDF/Doc
             return handler
-
-        def make_delete_action(proposal_data):
-            def handler(_):
-                print(f"DEBUG: Delete clicked for proposal {proposal_data.get('id')}")
-                # Future implementation: Delete logic
-            return handler
             
         def make_contract_action(proposal_data):
             def handler(_):
@@ -142,7 +137,7 @@ def _create_proposals_table(
                 data_cell(status_icon, widths[3], idx),
                 action_button(ft.Icons.EDIT, "Editar proposta", widths[4], idx, make_edit_action(p)),
                 action_button(ft.Icons.DESCRIPTION, "Gerar proposta", widths[5], idx, make_generate_action(p)),
-                action_button(ft.Icons.DELETE, "Excluir proposta", widths[6], idx, make_delete_action(p)),
+                action_button(ft.Icons.DELETE, "Excluir proposta", widths[6], idx, lambda _: on_delete(p)),
                 action_button(ft.Icons.PICTURE_AS_PDF, "Gerar Contrato", widths[7], idx, make_contract_action(p), icon_color=ft.Colors.RED_700),
             ],
             spacing=0,
@@ -186,16 +181,89 @@ def create_propostas_content(screen: Any) -> ft.Control:
             else:
                 filtered_proposals = all_proposals
             
-            # Sort by created_at desc (optional, but good for UX)
+            # Sort by created_at desc
             filtered_proposals.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
-            table_container.content = _create_proposals_table(filtered_proposals, screen)
+            table_container.content = _create_proposals_table(filtered_proposals, screen, handle_delete_request)
             table_container.update()
             
         except Exception as e:
             print(f"ERROR: Failed to load proposals: {e}")
             table_container.content = ft.Text(f"Erro ao carregar propostas: {e}", color=ft.Colors.RED)
             table_container.update()
+
+    def handle_delete_request(proposal: Dict[str, Any]):
+        proposal_id = proposal.get("id")
+        if not proposal_id:
+            return
+
+        def confirm_delete(e):
+            try:
+                # --- Deletion Process ---
+                
+                # 1. Validar existência
+                check = read_records("proposals", {"id": proposal_id})
+                if not check:
+                    raise Exception("Proposta não encontrada no banco de dados.")
+
+                # 2. Log inicial (Opcional: Logar em proposal_logs antes de deletar, caso falhe)
+                # Como audit_events não existe, vamos pular o log de auditoria externa.
+                try:
+                    create_record("proposal_logs", {
+                        "proposal_id": proposal_id,
+                        "message": "Deletion process initiated"
+                    })
+                except:
+                    pass # Se falhar o log, não impede a exclusão
+
+                # 3. Excluir proposta (cascade remove filhos)
+                delete_records("proposals", {"id": proposal_id})
+
+                # 4. Confirmar exclusão
+                check_after = read_records("proposals", {"id": proposal_id})
+                if check_after:
+                    raise Exception("Falha crítica: A proposta não foi excluída.")
+
+                # 5. Log final (Removido pois audit_events não existe e proposal_logs foi deletado em cascata)
+
+                # Sucesso
+                screen.page.close(dlg)
+                snackbar = ft.SnackBar(ft.Text("Proposta excluída com sucesso!"), bgcolor=ft.Colors.GREEN_600)
+                screen.page.overlay.append(snackbar)
+                snackbar.open = True
+                screen.page.update()
+                
+                # Refresh table
+                load_proposals(buyer_field.value)
+
+            except Exception as ex:
+                screen.page.close(dlg)
+                print(f"[ERROR] Delete failed: {ex}")
+                snackbar = ft.SnackBar(ft.Text(f"Erro ao excluir: {str(ex)}"), bgcolor=ft.Colors.RED_600)
+                screen.page.overlay.append(snackbar)
+                snackbar.open = True
+                screen.page.update()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Confirmar Exclusão"),
+            content=ft.Text(
+                "Tem certeza que deseja excluir esta proposta?\n\n"
+                "⚠ ATENÇÃO: Essa ação excluirá TODOS os dados da proposta, "
+                "incluindo sazonalidades e logs.\n"
+                "Essa ação é IRREVERSÍVEL.",
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda e: screen.page.close(dlg)),
+                ft.TextButton(
+                    "Excluir Definitivamente",
+                    on_click=confirm_delete,
+                    style=ft.ButtonStyle(color=ft.Colors.RED_600),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        screen.page.open(dlg)
 
     buyer_field = ft.TextField(
         label="Comprador",
@@ -208,7 +276,7 @@ def create_propostas_content(screen: Any) -> ft.Control:
         label="Vendedor",
         prefix_icon=ft.Icons.SEARCH,
         width=260,
-        visible=False # Hidden as requested
+        visible=False
     )
 
     def apply_filters(_: ft.ControlEvent) -> None:
@@ -267,18 +335,10 @@ def create_propostas_content(screen: Any) -> ft.Control:
     )
 
     # Initial Load
-    # We need to use a threading timer or similar if we want to load immediately without blocking, 
-    # but since this is called during build, we can just call it or let the user search.
-    # Better to load initially.
-    # However, calling update() inside build() might be tricky if not added to page yet.
-    # We can return the container with initial data if we fetch synchronously here, 
-    # or use `did_mount` if we were in a Control class. 
-    # Since this is a function returning controls, we can just fetch and build.
-    
     try:
         initial_proposals = read_records("proposals")
         initial_proposals.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        table_container.content = _create_proposals_table(initial_proposals, screen)
+        table_container.content = _create_proposals_table(initial_proposals, screen, handle_delete_request)
     except Exception as e:
         table_container.content = ft.Text(f"Erro ao carregar propostas: {e}", color=ft.Colors.RED)
 
