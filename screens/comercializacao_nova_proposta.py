@@ -1,11 +1,102 @@
 from typing import Any, Dict, Optional, List
 from datetime import datetime
 import flet as ft
+import requests
+from scripts.database import create_record
 
 # Constantes de horas por mês (simplificado)
 HOURS_PER_MONTH = [744, 672, 744, 720, 744, 720, 744, 744, 720, 744, 720, 744]
 MESES_KEYS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 MESES_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+# --- Helpers de Validação e Máscara (CNPJ) ---
+def validar_cnpj(cnpj: str) -> bool:
+    cnpj = ''.join(filter(str.isdigit, cnpj))
+    if len(cnpj) != 14 or cnpj == cnpj[0] * 14:
+        return False
+    peso = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    soma = sum(int(cnpj[i]) * peso[i] for i in range(12))
+    resto = soma % 11
+    digito1 = 0 if resto < 2 else 11 - resto
+    if int(cnpj[12]) != digito1:
+        return False
+    peso = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    soma = sum(int(cnpj[i]) * peso[i] for i in range(13))
+    resto = soma % 11
+    digito2 = 0 if resto < 2 else 11 - resto
+    return int(cnpj[13]) == digito2
+
+def consultar_cnpj_api(cnpj: str, razao_social_field: ft.TextField, page: ft.Page):
+    # Limpa formatação
+    cnpj_limpo = ''.join(filter(str.isdigit, cnpj))
+    
+    # Chave da API (Hardcoded conforme instructions/api_cnpj.py - idealmente viria de env var)
+    API_KEY = "4e364762-1c62-4db1-b2e9-d1f7bbee33c4-64a76f78-b79f-43a7-acc2-0a2d2825e2df"
+    url = f"https://api.cnpja.com.br/companies/{cnpj_limpo}"
+    headers = {"Authorization": API_KEY, "Accept": "application/json"}
+    
+    print(f"[CNPJ API] Consultando {cnpj_limpo}...")
+    
+    def _request():
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            r.raise_for_status()
+            dados = r.json()
+            razao = dados.get("name") or dados.get("razao_social") or ""
+            if razao:
+                razao_social_field.value = razao
+                razao_social_field.update()
+                print(f"[CNPJ API] Razão Social encontrada: {razao}")
+            else:
+                print("[CNPJ API] Razão Social não encontrada no JSON.")
+        except Exception as e:
+            print(f"[CNPJ API] Erro: {e}")
+
+    # Executar em thread separada para não travar UI? 
+    # O Flet roda handlers em threads, então requests síncrono aqui pode travar levemente se demorar.
+    # Para simplicidade, vamos manter direto, mas idealmente seria async ou thread.
+    _request()
+
+# --- Helpers de Validação e Máscara (Data) ---
+def validar_data(data: str) -> bool:
+    data_limpa = ''.join(filter(str.isdigit, data))
+    if len(data_limpa) != 8:
+        return False
+    try:
+        dia = int(data_limpa[:2])
+        mes = int(data_limpa[2:4])
+        ano = int(data_limpa[4:8])
+        datetime(ano, mes, dia)
+        return True
+    except ValueError:
+        return False
+
+def _parse_date_iso(date_str: str) -> Optional[str]:
+    """Converte dd/mm/aaaa para aaaa-mm-dd."""
+    if not date_str:
+        return None
+    try:
+        # Remove caracteres não numéricos para garantir
+        clean_date = ''.join(filter(str.isdigit, date_str))
+        if len(clean_date) != 8:
+            return None
+        dia = int(clean_date[:2])
+        mes = int(clean_date[2:4])
+        ano = int(clean_date[4:8])
+        return f"{ano:04d}-{mes:02d}-{dia:02d}"
+    except ValueError:
+        return None
+
+def _parse_float(value: Any) -> Optional[float]:
+    """Converte string com vírgula ou ponto para float."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).replace(",", "."))
+    except ValueError:
+        return None
 
 def create_nova_proposta_content(screen: Any) -> ft.Control:
     """
@@ -19,24 +110,52 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
     form_data = {
         "cnpj": "",
         "razao_social": "",
-        "submercado": None,
+        "submercado": "NE", # Default
         "inicio_suprimento": "",
         "fim_suprimento": "",
-        "tipo_energia": None,
+        "tipo_energia": "I5", # Default
         "modulacao": None,
         "data_faturamento": "",
-        "garantia": None,
-        "qty_meses": "",
-        "data_base": "",
-        "validade_proposta": "",
-        "commercial_conditions": {} # {year: {price, flex, sazo, vol, ...}}
+        "garantia": "Seguro Garantia", # Default
+        "qty_meses": "2", # Default
+        "data_base": datetime.now().strftime("%m/%Y"), # Default
+        "validade_proposta": datetime.now().strftime("%d/%m/%Y 18:00"), # Default
+        "commercial_conditions": {} 
     }
     
     # Referências para a tabela comercial
     commercial_table_ref = ft.Ref[ft.Column]()
-    commercial_rows_refs = [] # Lista de dicts com refs dos campos da tabela
+    commercial_rows_refs = [] 
 
-    # --- Helpers de Data ---
+    # --- Handlers de Máscara ---
+    def on_cnpj_change(e):
+        valor = ''.join(filter(str.isdigit, e.control.value))
+        valor = valor[:14]
+        valor_formatado = ''
+        if len(valor) > 0: valor_formatado = valor[:2]
+        if len(valor) > 2: valor_formatado += '.' + valor[2:5]
+        if len(valor) > 5: valor_formatado += '.' + valor[5:8]
+        if len(valor) > 8: valor_formatado += '/' + valor[8:12]
+        if len(valor) > 12: valor_formatado += '-' + valor[12:14]
+        
+        e.control.value = valor_formatado
+        
+        if len(valor) == 14:
+            if validar_cnpj(valor):
+                e.control.error_text = None
+                e.control.border_color = ft.Colors.GREEN
+                # Busca API
+                consultar_cnpj_api(valor, razao_social_field, screen.page)
+            else:
+                e.control.error_text = "CNPJ inválido"
+                e.control.border_color = ft.Colors.RED
+        else:
+            e.control.error_text = None
+            e.control.border_color = None
+        
+        e.control.update()
+
+    # --- Helpers de Data (Range) ---
     def _get_years_range(start_str: str, end_str: str) -> List[int]:
         print(f"[DEBUG] _get_years_range inputs: start='{start_str}', end='{end_str}'")
         try:
@@ -51,53 +170,6 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
         except ValueError as e:
             print(f"[DEBUG] Date parsing error: {e}")
             return []
-
-    # --- Aba 1: Dados Gerais ---
-    cnpj_field = ft.TextField(label="CNPJ", width=300)
-    razao_social_field = ft.TextField(label="Razão Social", width=500)
-    submercado_dd = ft.Dropdown(
-        label="Submercado",
-        width=300,
-        options=[
-            ft.dropdown.Option("SE/CO"),
-            ft.dropdown.Option("NE"),
-            ft.dropdown.Option("N"),
-            ft.dropdown.Option("S"),
-        ]
-    )
-    inicio_suprimento_field = ft.TextField(
-        label="Início Suprimento (dd/mm/aaaa)", 
-        width=240,
-        hint_text="01/01/2026"
-    )
-    fim_suprimento_field = ft.TextField(
-        label="Fim Suprimento (dd/mm/aaaa)", 
-        width=240,
-        hint_text="31/12/2030"
-    )
-    tipo_energia_dd = ft.Dropdown(
-        label="Tipo de Energia",
-        width=300,
-        options=[
-            ft.dropdown.Option("I5"),
-            ft.dropdown.Option("I1"),
-            ft.dropdown.Option("I0"),
-            ft.dropdown.Option("CONV"),
-            ft.dropdown.Option("CQ5"),
-        ]
-    )
-
-    dados_gerais_tab = ft.Container(
-        padding=20,
-        content=ft.Column(
-            controls=[
-                ft.Row([cnpj_field, razao_social_field]),
-                ft.Row([submercado_dd, tipo_energia_dd]),
-                ft.Row([inicio_suprimento_field, fim_suprimento_field]),
-            ],
-            spacing=20
-        )
-    )
 
     # --- Aba 2: Condições Comerciais (Lógica Dinâmica) ---
     
@@ -117,14 +189,12 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
         if ano not in form_data["commercial_conditions"]:
             form_data["commercial_conditions"][ano] = {}
         
-        # Tratamento numérico básico
         try:
             if campo in ["price", "flex", "sazo", "volume"] or campo in MESES_KEYS:
                 val_str = str(valor).replace(',', '.')
                 val_float = float(val_str) if val_str else None
                 form_data["commercial_conditions"][ano][campo] = val_float
                 
-                # Lógica Flat
                 if campo == "volume":
                     row_ref = next((r for r in commercial_rows_refs if r['ano'] == ano), None)
                     if row_ref and row_ref['flat'].value:
@@ -182,14 +252,23 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
                 form_data["commercial_conditions"][ano_destino][k] = v
         
         screen.page.update()
-        screen.page.show_snack_bar(ft.SnackBar(ft.Text("Dados replicados com sucesso!"), bgcolor=ft.Colors.GREEN_600))
+        
+        snackbar = ft.SnackBar(ft.Text("Dados replicados com sucesso!"), bgcolor=ft.Colors.GREEN_600)
+        screen.page.overlay.append(snackbar)
+        snackbar.open = True
+        screen.page.update()
 
+    commercial_tab_content = ft.Container(padding=10) 
+    
     def gerar_tabela_comercial():
         commercial_rows_refs.clear()
         years = _get_years_range(inicio_suprimento_field.value, fim_suprimento_field.value)
         
         if not years:
-            return ft.Text("Preencha o período de suprimento corretamente na aba 'Dados Gerais'.", color=ft.Colors.RED_500)
+            # Se não tiver anos válidos, limpa a tabela ou mostra mensagem
+            commercial_tab_content.content = ft.Text("Preencha o período de suprimento corretamente na aba 'Dados Gerais'.", color=ft.Colors.RED_500)
+            commercial_tab_content.update()
+            return
 
         # Cabeçalho
         header = ft.Row(
@@ -212,18 +291,21 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
         for idx, ano in enumerate(years):
             refs = {'ano': ano}
             
+            # Recuperar dados existentes do form_data
+            dados_ano = form_data["commercial_conditions"].get(ano, {})
+            
             # Campos
-            preco = criar_campo_tabela(80, on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'price', e.control.value))
-            flex = criar_campo_tabela(80, on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'flex', e.control.value))
-            sazo = criar_campo_tabela(80, on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'sazo', e.control.value))
-            vol = criar_campo_tabela(80, on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'volume', e.control.value))
+            preco = criar_campo_tabela(80, value=dados_ano.get('price'), on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'price', e.control.value))
+            flex = criar_campo_tabela(80, value=dados_ano.get('flex'), on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'flex', e.control.value))
+            sazo = criar_campo_tabela(80, value=dados_ano.get('sazo'), on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'sazo', e.control.value))
+            vol = criar_campo_tabela(80, value=dados_ano.get('volume'), on_change=lambda e, a=ano: atualizar_dados_comerciais(a, 'volume', e.control.value))
             flat = ft.Switch(value=False, height=30, active_color=ft.Colors.ORANGE_600, on_change=lambda e, a=ano: on_flat_change(e, a))
             
             refs.update({'preco': preco, 'flex': flex, 'sazo': sazo, 'volume': vol, 'flat': flat, 'meses': []})
             
             meses_controls = []
             for mk in MESES_KEYS:
-                mc = criar_campo_tabela(70, on_change=lambda e, a=ano, k=mk: atualizar_dados_comerciais(a, k, e.control.value))
+                mc = criar_campo_tabela(70, value=dados_ano.get(mk), on_change=lambda e, a=ano, k=mk: atualizar_dados_comerciais(a, k, e.control.value))
                 meses_controls.append(mc)
                 refs['meses'].append(mc)
 
@@ -242,19 +324,96 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
             rows_controls.append(row)
             commercial_rows_refs.append(refs)
 
-        return ft.Column(controls=rows_controls, spacing=5, scroll=ft.ScrollMode.ALWAYS)
+        commercial_tab_content.content = ft.Column(controls=rows_controls, spacing=5, scroll=ft.ScrollMode.ALWAYS)
+        commercial_tab_content.update()
 
-    def on_tab_change(e):
-        # Se mudou para a aba Comercial (index 1), regenera a tabela
-        if e.control.selected_index == 1:
-            content = gerar_tabela_comercial()
-            # Atualiza o container da tabela
-            # Precisamos de um container fixo para substituir o conteudo
-            commercial_tab_content.content = content
-            commercial_tab_content.update()
+    def on_date_change(e):
+        valor = ''.join(filter(str.isdigit, e.control.value))
+        valor = valor[:8]
+        valor_formatado = ''
+        if len(valor) > 0: valor_formatado = valor[:2]
+        if len(valor) > 2: valor_formatado += '/' + valor[2:4]
+        if len(valor) > 4: valor_formatado += '/' + valor[4:8]
+        
+        e.control.value = valor_formatado
+        
+        if len(valor) == 8:
+            if validar_data(valor):
+                e.control.error_text = None
+                e.control.border_color = ft.Colors.GREEN
+                # Tenta gerar tabela se ambas as datas estiverem preenchidas e válidas
+                v_inicio = ''.join(filter(str.isdigit, inicio_suprimento_field.value))
+                v_fim = ''.join(filter(str.isdigit, fim_suprimento_field.value))
+                if len(v_inicio) == 8 and len(v_fim) == 8 and validar_data(v_inicio) and validar_data(v_fim):
+                     gerar_tabela_comercial()
+            else:
+                e.control.error_text = "Data inválida"
+                e.control.border_color = ft.Colors.RED
+        else:
+            e.control.error_text = None
+            e.control.border_color = None
+            
+        e.control.update()
 
-    commercial_tab_content = ft.Container(padding=10) # Placeholder
+    # --- Aba 1: Dados Gerais ---
+    cnpj_field = ft.TextField(
+        label="CNPJ", 
+        width=200,
+        on_change=on_cnpj_change,
+        hint_text="00.000.000/0000-00"
+    )
+    razao_social_field = ft.TextField(label="Razão Social", width=600)
     
+    submercado_dd = ft.Dropdown(
+        label="Submercado",
+        width=cnpj_field.width,
+        value="NE", # Default
+        options=[
+            ft.dropdown.Option("SE/CO"),
+            ft.dropdown.Option("NE"),
+            ft.dropdown.Option("N"),
+            ft.dropdown.Option("S"),
+        ]
+    )
+    
+    inicio_suprimento_field = ft.TextField(
+        label="Início Suprimento",
+        width=cnpj_field.width,
+        hint_text="01/01/2026",
+        on_change=on_date_change
+    )
+    fim_suprimento_field = ft.TextField(
+        label="Fim Suprimento",
+        width=cnpj_field.width,
+        hint_text="31/12/2030",
+        on_change=on_date_change
+    )
+    
+    tipo_energia_dd = ft.Dropdown(
+        label="Tipo de Energia",
+        width=cnpj_field.width,
+        value="I5", # Default
+        options=[
+            ft.dropdown.Option("I5"),
+            ft.dropdown.Option("I1"),
+            ft.dropdown.Option("I0"),
+            ft.dropdown.Option("CONV"),
+            ft.dropdown.Option("CQ5"),
+        ]
+    )
+
+    dados_gerais_tab = ft.Container(
+        padding=20,
+        content=ft.Column(
+            controls=[
+                ft.Row([cnpj_field, razao_social_field]),
+                ft.Row([submercado_dd, tipo_energia_dd]),
+                ft.Row([inicio_suprimento_field, fim_suprimento_field]),
+            ],
+            spacing=20
+        )
+    )
+
     comercial_tab = ft.Container(
         padding=20,
         content=ft.Column(
@@ -269,17 +428,31 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
 
     # --- Aba 3: Dados Complementares ---
     modulacao_dd = ft.Dropdown(
-        label="Modulação", width=300,
-        options=[ft.dropdown.Option("FLAT"), ft.dropdown.Option("CARGA")]
+        label="Modulação", width=200,
+        options=[ft.dropdown.Option("FLAT"), ft.dropdown.Option("CARGA")],
+        value="FLAT", # Default]
     )
-    data_fat_pag_field = ft.TextField(label="Data de faturamento e pagamento", width=400)
+    data_fat_pag_field = ft.TextField(label="Data de pagamento (du)", width=200, value=6)
+    
     garantia_dd = ft.Dropdown(
-        label="Garantia", width=300,
+        label="Garantia", width=200,
+        value="Seguro Garantia", # Default
         options=[ft.dropdown.Option("Seguro Garantia"), ft.dropdown.Option("Carta fiança"), ft.dropdown.Option("Todas")]
     )
-    qty_meses_field = ft.TextField(label="Qty_meses", width=200)
-    data_base_field = ft.TextField(label="Data Base", width=200)
-    validade_proposta_field = ft.TextField(label="Validade da proposta", width=200)
+    
+    qty_meses_field = ft.TextField(label="Qty_meses", width=200, value="2") # Default
+    
+    data_base_field = ft.TextField(
+        label="Data Base", 
+        width=200,
+        value=datetime.now().strftime("%m/%Y") # Default
+    )
+    
+    validade_proposta_field = ft.TextField(
+        label="Validade da proposta", 
+        width=200,
+        value=datetime.now().strftime("%d/%m/%Y 17:00 h") # Default
+    )
 
     complementares_tab = ft.Container(
         padding=20,
@@ -297,7 +470,6 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
     tabs = ft.Tabs(
         selected_index=0,
         animation_duration=300,
-        on_change=on_tab_change,
         tabs=[
             ft.Tab(text="Dados Gerais", content=dados_gerais_tab),
             ft.Tab(text="Cond. Comerciais", content=comercial_tab),
@@ -308,13 +480,101 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
 
     # --- Ações ---
     def on_save(e):
-        print("Salvar Proposta - Dados Gerais:", 
-              cnpj_field.value, razao_social_field.value, 
-              inicio_suprimento_field.value, fim_suprimento_field.value)
-        print("Salvar Proposta - Dados Comerciais:", form_data["commercial_conditions"])
-        
-        screen.page.show_snack_bar(ft.SnackBar(ft.Text("Proposta salva (Simulação)!"), bgcolor=ft.Colors.GREEN_600))
-        screen.navigation.go("/comercializacao", params={"submenu": "propostas"})
+        # 1. Validação Básica
+        required_fields = [
+            (cnpj_field, "CNPJ"),
+            (razao_social_field, "Razão Social"),
+            (inicio_suprimento_field, "Início Suprimento"),
+            (fim_suprimento_field, "Fim Suprimento")
+        ]
+        for field, name in required_fields:
+            if not field.value:
+                snackbar = ft.SnackBar(ft.Text(f"Campo obrigatório: {name}"), bgcolor=ft.Colors.RED_600)
+                screen.page.overlay.append(snackbar)
+                snackbar.open = True
+                screen.page.update()
+                return
+
+        try:
+            # 2. Montar Payload da Proposta (Etapa 1)
+            proposal_payload = {
+                "customer_cnpj": ''.join(filter(str.isdigit, cnpj_field.value)), # Remove máscara
+                "customer_name": razao_social_field.value,
+                "submarket": submercado_dd.value,
+                "energy_type": tipo_energia_dd.value,
+                "supply_start": _parse_date_iso(inicio_suprimento_field.value),
+                "supply_end": _parse_date_iso(fim_suprimento_field.value),
+                "modulation": modulacao_dd.value,
+                "billing_due_day": int(str(data_fat_pag_field.value)) if str(data_fat_pag_field.value).isdigit() else None,
+                "guarantee_type": garantia_dd.value,
+                "guarantee_months": int(str(qty_meses_field.value)) if str(qty_meses_field.value).isdigit() else None,
+                "reference_date": data_base_field.value,
+                "proposal_validity": validade_proposta_field.value,
+                "status": "PENDING"
+            }
+
+            print(f"[DEBUG] Saving proposal: {proposal_payload}")
+            
+            # Salvar Proposta
+            res_proposal = create_record("proposals", proposal_payload)
+            if isinstance(res_proposal, list) and len(res_proposal) > 0:
+                proposal_id = res_proposal[0].get('id')
+            elif isinstance(res_proposal, dict):
+                proposal_id = res_proposal.get('id')
+            else:
+                raise Exception("Falha ao obter ID da proposta salva.")
+
+            if not proposal_id:
+                raise Exception("ID da proposta não retornado pelo banco.")
+
+            # Log Sucesso Proposta
+            create_record("proposal_logs", {"proposal_id": proposal_id, "message": "Proposal created successfully"})
+
+            # 3. Salvar Sazonalidades (Etapa 2)
+            years = _get_years_range(inicio_suprimento_field.value, fim_suprimento_field.value)
+            
+            for ano in years:
+                dados_ano = form_data["commercial_conditions"].get(ano, {})
+                
+                sazo_payload = {
+                    "proposal_id": proposal_id,
+                    "year": ano,
+                    "price": _parse_float(dados_ano.get("price")),
+                    "flex": _parse_float(dados_ano.get("flex")),
+                    "seasonality": _parse_float(dados_ano.get("sazo")),
+                    "average_volume": _parse_float(dados_ano.get("volume")),
+                    "is_flat": False, # O switch na UI é apenas visual/helper, mas podemos tentar inferir ou pegar do ref se precisarmos salvar o estado. Instrução diz "campo Flat".
+                }
+                
+                # Adicionar meses
+                for mk in MESES_KEYS:
+                    sazo_payload[mk] = _parse_float(dados_ano.get(mk))
+
+                create_record("proposal_seasonalities", sazo_payload)
+
+            # Log Sucesso Sazonalidades
+            create_record("proposal_logs", {"proposal_id": proposal_id, "message": "All seasonalities saved successfully"})
+
+            snackbar = ft.SnackBar(ft.Text("Proposta salva com sucesso!"), bgcolor=ft.Colors.GREEN_600)
+            screen.page.overlay.append(snackbar)
+            snackbar.open = True
+            screen.page.update()
+            
+            screen.navigation.go("/comercializacao", params={"submenu": "propostas"})
+
+        except Exception as ex:
+            print(f"[ERROR] Erro ao salvar proposta: {ex}")
+            snackbar = ft.SnackBar(ft.Text(f"Erro ao salvar: {str(ex)}"), bgcolor=ft.Colors.RED_600)
+            screen.page.overlay.append(snackbar)
+            snackbar.open = True
+            screen.page.update()
+            
+            # Tenta logar erro se tiver ID
+            if 'proposal_id' in locals() and proposal_id:
+                try:
+                    create_record("proposal_logs", {"proposal_id": proposal_id, "message": f"Error: {str(ex)}"})
+                except:
+                    pass
 
     def on_cancel(e):
         screen.navigation.go("/comercializacao", params={"submenu": "propostas"})
