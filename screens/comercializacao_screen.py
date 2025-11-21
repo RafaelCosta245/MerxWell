@@ -51,6 +51,7 @@ class ComercializacaoScreen(BaseScreen):
         end_date = params.get("end_date")
         precos_view = params.get("precos_view")
         propostas_view = params.get("propostas_view")
+        proposal_id = params.get("proposal_id")
 
         return self._create_main_content(
             selected_submenu,
@@ -66,6 +67,7 @@ class ComercializacaoScreen(BaseScreen):
             end_date,
             precos_view,
             propostas_view,
+            proposal_id,
         )
 
     # def create_footer(self) -> ft.Control:
@@ -102,6 +104,7 @@ class ComercializacaoScreen(BaseScreen):
         end_date: Optional[str] = None,
         precos_view: Optional[str] = None,
         propostas_view: Optional[str] = None,
+        proposal_id: Optional[str] = None,
     ) -> ft.Control:
         """Cria o layout principal com submenu à esquerda e conteúdo à direita."""
         return ft.Container(
@@ -124,6 +127,7 @@ class ComercializacaoScreen(BaseScreen):
                         end_date,
                         precos_view,
                         propostas_view,
+                        proposal_id,
                     ),
                 ],
                 spacing=20,
@@ -222,6 +226,7 @@ class ComercializacaoScreen(BaseScreen):
         end_date: Optional[str] = None,
         precos_view: Optional[str] = None,
         propostas_view: Optional[str] = None,
+        proposal_id: Optional[str] = None,
     ) -> ft.Control:
         """Seleciona o conteúdo de acordo com o submenu escolhido."""
         print(
@@ -284,7 +289,7 @@ class ComercializacaoScreen(BaseScreen):
         elif selected_submenu == "propostas":
             if propostas_view == "new":
                 print("[ComercializacaoScreen] Abrindo formulário de nova proposta")
-                inner = comercializacao_nova_proposta.create_nova_proposta_content(self)
+                inner = comercializacao_nova_proposta.create_nova_proposta_content(self, proposal_id=proposal_id)
                 return inner
             else:
                 inner = comercializacao_propostas.create_propostas_content(self)

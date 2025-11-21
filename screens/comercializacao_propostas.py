@@ -114,7 +114,14 @@ def _create_proposals_table(
         def make_edit_action(proposal_data):
             def handler(_):
                 print(f"DEBUG: Edit clicked for proposal {proposal_data.get('id')}")
-                # Future implementation: Navigate to edit screen
+                screen.navigation.go(
+                    "/comercializacao",
+                    params={
+                        "submenu": "propostas",
+                        "propostas_view": "new",
+                        "proposal_id": str(proposal_data.get("id") or ""),
+                    },
+                )
             return handler
 
         def make_generate_action(proposal_data):

@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional, List
 from datetime import datetime
 import flet as ft
 import requests
-from scripts.database import create_record
+from scripts.database import create_record, read_records, update_record, delete_records
 
 # Constantes de horas por mês (simplificado)
 HOURS_PER_MONTH = [744, 672, 744, 720, 744, 720, 744, 744, 720, 744, 720, 744]
@@ -87,6 +87,16 @@ def _parse_date_iso(date_str: str) -> Optional[str]:
     except ValueError:
         return None
 
+def _format_date_br(iso_date: str) -> str:
+    """Converte aaaa-mm-dd para dd/mm/aaaa."""
+    if not iso_date:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(iso_date).replace("Z", ""))
+        return dt.strftime("%d/%m/%Y")
+    except ValueError:
+        return iso_date
+
 def _parse_float(value: Any) -> Optional[float]:
     """Converte string com vírgula ou ponto para float."""
     if value is None or value == "":
@@ -98,12 +108,14 @@ def _parse_float(value: Any) -> Optional[float]:
     except ValueError:
         return None
 
-def create_nova_proposta_content(screen: Any) -> ft.Control:
+def create_nova_proposta_content(screen: Any, proposal_id: Optional[str] = None) -> ft.Control:
     """
     Formulário de Nova Proposta com 3 abas:
     1. Dados Gerais
     2. Cond. Comerciais (Tabela dinâmica por ano)
     3. Dados Complementares
+    
+    Se proposal_id for fornecido, carrega os dados para edição.
     """
 
     # --- Estado do Formulário ---
@@ -144,7 +156,7 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
             if validar_cnpj(valor):
                 e.control.error_text = None
                 e.control.border_color = ft.Colors.GREEN
-                # Busca API
+                # Busca API apenas se não estiver carregando dados (para evitar overwrite indesejado, mas aqui é on_change, então ok)
                 consultar_cnpj_api(valor, razao_social_field, screen.page)
             else:
                 e.control.error_text = "CNPJ inválido"
@@ -478,6 +490,52 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
         expand=True
     )
 
+    # --- Carregar Dados (Se Edição) ---
+    if proposal_id:
+        try:
+            print(f"[DEBUG] Loading proposal {proposal_id} for editing...")
+            # 1. Carregar Proposta
+            p_data = read_records("proposals", {"id": proposal_id})
+            if p_data:
+                p = p_data[0]
+                
+                # Preencher Dados Gerais
+                cnpj_field.value = p.get("customer_cnpj")
+                razao_social_field.value = p.get("customer_name")
+                submercado_dd.value = p.get("submarket")
+                tipo_energia_dd.value = p.get("energy_type")
+                inicio_suprimento_field.value = _format_date_br(p.get("supply_start"))
+                fim_suprimento_field.value = _format_date_br(p.get("supply_end"))
+                
+                # Preencher Dados Complementares
+                modulacao_dd.value = p.get("modulation")
+                data_fat_pag_field.value = str(p.get("billing_due_day") or "")
+                garantia_dd.value = p.get("guarantee_type")
+                qty_meses_field.value = str(p.get("guarantee_months") or "")
+                data_base_field.value = p.get("reference_date")
+                validade_proposta_field.value = p.get("proposal_validity")
+
+                # 2. Carregar Sazonalidades
+                sazo_data = read_records("proposal_seasonalities", {"proposal_id": proposal_id})
+                for s in sazo_data:
+                    ano = s.get("year")
+                    if ano:
+                        form_data["commercial_conditions"][ano] = {
+                            "price": s.get("price"),
+                            "flex": s.get("flex"),
+                            "sazo": s.get("seasonality"),
+                            "volume": s.get("average_volume"),
+                            # Meses
+                            **{k: s.get(k) for k in MESES_KEYS}
+                        }
+                
+                # Gerar tabela com os dados carregados
+                gerar_tabela_comercial()
+                
+        except Exception as e:
+            print(f"[ERROR] Failed to load proposal data: {e}")
+            # Poderíamos mostrar um snackbar aqui, mas como é construção da UI, melhor logar.
+
     # --- Ações ---
     def on_save(e):
         # 1. Validação Básica
@@ -496,7 +554,7 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
                 return
 
         try:
-            # 2. Montar Payload da Proposta (Etapa 1)
+            # 2. Montar Payload da Proposta
             proposal_payload = {
                 "customer_cnpj": ''.join(filter(str.isdigit, cnpj_field.value)), # Remove máscara
                 "customer_name": razao_social_field.value,
@@ -510,40 +568,59 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
                 "guarantee_months": int(str(qty_meses_field.value)) if str(qty_meses_field.value).isdigit() else None,
                 "reference_date": data_base_field.value,
                 "proposal_validity": validade_proposta_field.value,
-                "status": "PENDING"
+                # Status não muda na edição, ou mantemos o existente? 
+                # Se for novo, PENDING. Se edição, não enviamos status para não resetar se já foi aceito.
             }
-
-            print(f"[DEBUG] Saving proposal: {proposal_payload}")
             
-            # Salvar Proposta
-            res_proposal = create_record("proposals", proposal_payload)
-            if isinstance(res_proposal, list) and len(res_proposal) > 0:
-                proposal_id = res_proposal[0].get('id')
-            elif isinstance(res_proposal, dict):
-                proposal_id = res_proposal.get('id')
-            else:
-                raise Exception("Falha ao obter ID da proposta salva.")
-
             if not proposal_id:
-                raise Exception("ID da proposta não retornado pelo banco.")
+                proposal_payload["status"] = "PENDING"
+
+            print(f"[DEBUG] Saving proposal (ID={proposal_id}): {proposal_payload}")
+            
+            # Salvar/Atualizar Proposta
+            if proposal_id:
+                # UPDATE
+                res_proposal = update_record("proposals", proposal_id, proposal_payload)
+                current_proposal_id = proposal_id
+                log_msg = "Proposal updated successfully"
+            else:
+                # CREATE
+                res_proposal = create_record("proposals", proposal_payload)
+                if isinstance(res_proposal, list) and len(res_proposal) > 0:
+                    current_proposal_id = res_proposal[0].get('id')
+                elif isinstance(res_proposal, dict):
+                    current_proposal_id = res_proposal.get('id')
+                else:
+                    raise Exception("Falha ao obter ID da proposta salva.")
+                log_msg = "Proposal created successfully"
+
+            if not current_proposal_id:
+                raise Exception("ID da proposta não disponível.")
 
             # Log Sucesso Proposta
-            create_record("proposal_logs", {"proposal_id": proposal_id, "message": "Proposal created successfully"})
+            try:
+                create_record("proposal_logs", {"proposal_id": current_proposal_id, "message": log_msg})
+            except:
+                pass
 
             # 3. Salvar Sazonalidades (Etapa 2)
+            # Se edição, deletamos as antigas para recriar (mais simples que fazer diff)
+            if proposal_id:
+                delete_records("proposal_seasonalities", {"proposal_id": current_proposal_id})
+
             years = _get_years_range(inicio_suprimento_field.value, fim_suprimento_field.value)
             
             for ano in years:
                 dados_ano = form_data["commercial_conditions"].get(ano, {})
                 
                 sazo_payload = {
-                    "proposal_id": proposal_id,
+                    "proposal_id": current_proposal_id,
                     "year": ano,
                     "price": _parse_float(dados_ano.get("price")),
                     "flex": _parse_float(dados_ano.get("flex")),
                     "seasonality": _parse_float(dados_ano.get("sazo")),
                     "average_volume": _parse_float(dados_ano.get("volume")),
-                    "is_flat": False, # O switch na UI é apenas visual/helper, mas podemos tentar inferir ou pegar do ref se precisarmos salvar o estado. Instrução diz "campo Flat".
+                    "is_flat": False, 
                 }
                 
                 # Adicionar meses
@@ -553,7 +630,10 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
                 create_record("proposal_seasonalities", sazo_payload)
 
             # Log Sucesso Sazonalidades
-            create_record("proposal_logs", {"proposal_id": proposal_id, "message": "All seasonalities saved successfully"})
+            try:
+                create_record("proposal_logs", {"proposal_id": current_proposal_id, "message": "All seasonalities saved/updated successfully"})
+            except:
+                pass
 
             snackbar = ft.SnackBar(ft.Text("Proposta salva com sucesso!"), bgcolor=ft.Colors.GREEN_600)
             screen.page.overlay.append(snackbar)
@@ -570,9 +650,9 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
             screen.page.update()
             
             # Tenta logar erro se tiver ID
-            if 'proposal_id' in locals() and proposal_id:
+            if 'current_proposal_id' in locals() and current_proposal_id:
                 try:
-                    create_record("proposal_logs", {"proposal_id": proposal_id, "message": f"Error: {str(ex)}"})
+                    create_record("proposal_logs", {"proposal_id": current_proposal_id, "message": f"Error: {str(ex)}"})
                 except:
                     pass
 
@@ -588,6 +668,8 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
         spacing=10
     )
 
+    title_text = "Editar Proposta" if proposal_id else "Nova Proposta"
+
     return ft.Container(
         expand=True,
         padding=20,
@@ -595,7 +677,7 @@ def create_nova_proposta_content(screen: Any) -> ft.Control:
         border_radius=10,
         content=ft.Column(
             controls=[
-                ft.Text("Nova Proposta", size=24, weight=ft.FontWeight.BOLD),
+                ft.Text(title_text, size=24, weight=ft.FontWeight.BOLD),
                 tabs,
                 ft.Divider(),
                 actions_row
