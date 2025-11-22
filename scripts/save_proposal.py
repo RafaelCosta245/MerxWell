@@ -349,6 +349,9 @@ def generate_proposal(
     print(f"Iniciando geração de proposta...")
 
     try:
+        import pythoncom
+        pythoncom.CoInitialize()
+        
         doc = Document(arquivo_origem)
 
         # 1. Criar tabelas dinâmicas (Volume e Preço)
@@ -384,6 +387,12 @@ def generate_proposal(
     except Exception as e:
         print(f"ERRO INESPERADO: {e}")
         raise
+    finally:
+        try:
+            import pythoncom
+            pythoncom.CoUninitialize()
+        except:
+            pass
 
 
 if __name__ == "__main__":

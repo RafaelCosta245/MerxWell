@@ -170,7 +170,7 @@ def _create_proposals_table(
                     tipo_proposta = f"Indicativa - Validade até {validade}"
 
                     # Call generator
-                    from scripts.save_proposal import generate_proposal
+                    from scripts.proposal_generator import generate_proposal
                     
                     output_path = generate_proposal(
                         data_hoje=data_hoje,

@@ -49,12 +49,12 @@ def format_decimal(val):
 
 
 def format_currency(val):
-	"""Formata float para moeda BRL (ex: 199.0 -> R$ 199,00)."""
+	"""Formata float para string BRL sem símbolo (ex: 199.0 -> 199,00)."""
 	if isinstance(val, (int, float)):
 		# Formata com separador de milhar ponto e decimal vírgula
 		s = f"{val:,.2f}"
 		s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
-		return f"R$ {s}"
+		return s
 	return str(val)
 
 
@@ -347,12 +347,15 @@ def generate_proposal(
 
 	BASE_DIR = Path(__file__).resolve().parent.parent
 	arquivo_origem = BASE_DIR / "assets" / "documents" / "standard_proposal.docx"
-	arquivo_final_docx = BASE_DIR / "assets" / "documents" / "standard_proposal_preenchida.docx"
-	arquivo_final_pdf = BASE_DIR / "assets" / "documents" / "standard_proposal_preenchida.pdf"
+	arquivo_final_docx = BASE_DIR / "assets" / "documents" / f"{razao_social} - Proposta de Venda de Energia NOVO ATACAREJO.docx"
+	arquivo_final_pdf = BASE_DIR / "assets" / "documents" / f"{razao_social} - Proposta de Venda de Energia NOVO ATACAREJO.pdf"
 
 	print(f"Iniciando geração de proposta...")
 
 	try:
+		import pythoncom
+		pythoncom.CoInitialize()
+
 		doc = Document(arquivo_origem)
 
 		# 1. Criar tabelas dinâmicas (Volume e Preço)
@@ -361,7 +364,7 @@ def generate_proposal(
 
 		# Tabela Volume
 		vol_values = [format_decimal(v) for v in curva_vol]
-		replace_placeholder_with_table(doc, "{{CURVA_VOL}}", headers, "Vol (MWm)", vol_values)
+		replace_placeholder_with_table(doc, "{{CURVA_VOL}}", headers, "MWm", vol_values)
 
 		# Tabela Preço
 		price_values = [format_currency(p) for p in curva_precos]
@@ -388,25 +391,31 @@ def generate_proposal(
 	except Exception as e:
 		print(f"ERRO INESPERADO: {e}")
 		raise
+	finally:
+		try:
+			import pythoncom
+			pythoncom.CoUninitialize()
+		except:
+			pass
 
 
-if __name__ == "__main__":
-	# Teste manual
-	generate_proposal(
-		data_hoje="21/11/2025",
-		razao_social="flex IMPORT COMERCIO E INDUSTRIA LTDA",
-		cnpj="08.297.453/0001-33",
-		submercado="Nordeste",
-		inicio="01/01/2026",
-		fim="31/12/2028",
-		curva_vol=[0.69, 0.69, 0.69, 0.5, 0.4],
-		curva_precos=[199, 199, 197, 200, 180],
-		anos=[2026, 2027, 2028, 2029, 2030],
-		tipo_energia="Energia Incentivada 50%",
-		flex="30",
-		sazo="100",
-		modulacao="Flat",
-		pagamento="6",
-		qty_meses="2",
-		tipo_proposta="Oficial"
-	)
+# if __name__ == "__main__":
+# 	# Teste manual
+# 	generate_proposal(
+# 		data_hoje="21/11/2025",
+# 		razao_social="flex IMPORT COMERCIO E INDUSTRIA LTDA",
+# 		cnpj="08.297.453/0001-33",
+# 		submercado="Nordeste",
+# 		inicio="01/01/2026",
+# 		fim="31/12/2028",
+# 		curva_vol=[0.69, 0.69, 0.69, 0.5, 0.4],
+# 		curva_precos=[199, 199, 197, 200, 180],
+# 		anos=[2026, 2027, 2028, 2029, 2030],
+# 		tipo_energia="Energia Incentivada 50%",
+# 		flex="30",
+# 		sazo="100",
+# 		modulacao="Flat",
+# 		pagamento="6",
+# 		qty_meses="2",
+# 		tipo_proposta="Oficial"
+# 	)
