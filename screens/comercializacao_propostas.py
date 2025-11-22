@@ -127,7 +127,83 @@ def _create_proposals_table(
         def make_generate_action(proposal_data):
             def handler(_):
                 print(f"DEBUG: Generate proposal clicked for {proposal_data.get('id')}")
-                # Future implementation: Generate PDF/Doc
+                try:
+                    proposal_id = proposal_data.get("id")
+                    if not proposal_id:
+                        return
+
+                    # Fetch seasonalities
+                    seasonalities = read_records("proposal_seasonalities", {"proposal_id": proposal_id})
+                    # Sort by year
+                    seasonalities.sort(key=lambda x: x.get("year") or 0)
+
+                    if not seasonalities:
+                        raise Exception("Não há dados de sazonalidade para esta proposta.")
+
+                    # Extract lists
+                    anos = [s.get("year") for s in seasonalities]
+                    curva_vol = [s.get("average_volume") or 0.0 for s in seasonalities]
+                    curva_precos = [s.get("price") or 0.0 for s in seasonalities]
+                    
+                    # Extract single values (take from first year or default)
+                    first_sazo = seasonalities[0]
+                    flex_val = first_sazo.get("flex")
+                    sazo_val = first_sazo.get("seasonality")
+
+                    # Format params
+                    data_hoje = datetime.now().strftime("%d/%m/%Y")
+                    
+                    # CNPJ formatting
+                    raw_cnpj = str(proposal_data.get("customer_cnpj") or "")
+                    digits = "".join(filter(str.isdigit, raw_cnpj))
+                    if len(digits) == 14:
+                        cnpj_fmt = f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}"
+                    else:
+                        cnpj_fmt = raw_cnpj
+
+                    # Dates
+                    inicio = _format_date(proposal_data.get("supply_start"))
+                    fim = _format_date(proposal_data.get("supply_end"))
+
+                    # Tipo Proposta
+                    validade = proposal_data.get("proposal_validity") or "-"
+                    tipo_proposta = f"Indicativa - Validade até {validade}"
+
+                    # Call generator
+                    from scripts.save_proposal import generate_proposal
+                    
+                    output_path = generate_proposal(
+                        data_hoje=data_hoje,
+                        razao_social=proposal_data.get("customer_name") or "",
+                        cnpj=cnpj_fmt,
+                        submercado=proposal_data.get("submarket") or "",
+                        inicio=inicio,
+                        fim=fim,
+                        curva_vol=curva_vol,
+                        curva_precos=curva_precos,
+                        anos=anos,
+                        tipo_energia=proposal_data.get("energy_type") or "",
+                        flex=str(flex_val) if flex_val is not None else "",
+                        sazo=str(sazo_val) if sazo_val is not None else "",
+                        modulacao=proposal_data.get("modulation") or "",
+                        pagamento=str(proposal_data.get("billing_due_day") or ""),
+                        qty_meses=str(proposal_data.get("guarantee_months") or ""),
+                        tipo_proposta=tipo_proposta
+                    )
+
+                    # Show success
+                    snackbar = ft.SnackBar(ft.Text(f"Proposta gerada: {output_path}"), bgcolor=ft.Colors.GREEN_600)
+                    screen.page.overlay.append(snackbar)
+                    snackbar.open = True
+                    screen.page.update()
+
+                except Exception as ex:
+                    print(f"ERROR generating proposal: {ex}")
+                    snackbar = ft.SnackBar(ft.Text(f"Erro ao gerar proposta: {ex}"), bgcolor=ft.Colors.RED_600)
+                    screen.page.overlay.append(snackbar)
+                    snackbar.open = True
+                    screen.page.update()
+
             return handler
             
         def make_contract_action(proposal_data):

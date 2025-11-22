@@ -45,12 +45,12 @@ def format_decimal(val):
     return str(val)
 
 def format_currency(val):
-    """Formata float para moeda BRL (ex: 199.0 -> R$ 199,00)."""
+    """Formata float para string BRL sem símbolo (ex: 199.0 -> 199,00)."""
     if isinstance(val, (int, float)):
         # Formata com separador de milhar ponto e decimal vírgula
         s = f"{val:,.2f}"
         s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
-        return f"R$ {s}"
+        return s
     return str(val)
 
 def replace_placeholder_with_table(doc, placeholder, headers, row_label, data_values):
@@ -357,7 +357,7 @@ def generate_proposal(
         
         # Tabela Volume
         vol_values = [format_decimal(v) for v in curva_vol]
-        replace_placeholder_with_table(doc, "{{CURVA_VOL}}", headers, "Vol (MWm)", vol_values)
+        replace_placeholder_with_table(doc, "{{CURVA_VOL}}", headers, "MWm", vol_values)
         
         # Tabela Preço
         price_values = [format_currency(p) for p in curva_precos]
