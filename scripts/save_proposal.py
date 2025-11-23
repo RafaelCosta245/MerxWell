@@ -341,10 +341,11 @@ def generate_proposal(
         "{{TIPO_PROPOSTA}}": tipo_proposta,
     }
 
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    arquivo_origem = BASE_DIR / "assets" / "documents" / "standard_proposal.docx"
-    arquivo_final_docx = BASE_DIR / "assets" / "documents" / "standard_proposal_preenchida.docx"
-    arquivo_final_pdf = BASE_DIR / "assets" / "documents" / "standard_proposal_preenchida.pdf"
+    from helpers.paths import get_asset_path
+    
+    arquivo_origem = get_asset_path("documents", "standard_proposal.docx")
+    arquivo_final_docx = get_asset_path("documents", "standard_proposal_preenchida.docx")
+    arquivo_final_pdf = get_asset_path("documents", "standard_proposal_preenchida.pdf")
 
     print(f"Iniciando geração de proposta...")
 

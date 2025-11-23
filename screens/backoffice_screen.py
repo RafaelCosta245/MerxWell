@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional
 import flet as ft
 
 from screens import BaseScreen
+from helpers.storage import get_output_directory, prompt_folder_selection
 
 
 class BackofficeScreen(BaseScreen):
@@ -42,11 +43,79 @@ class BackofficeScreen(BaseScreen):
             size=14,
         )
 
+    def _create_output_directory_section(self) -> ft.Control:
+        """Create section to display and change output directory."""
+        current_dir = get_output_directory(self.page)
+        
+        dir_text = ft.Text(
+            value=current_dir or "Nenhuma pasta configurada",
+            size=12,
+            color=ft.Colors.GREY_700,
+            weight=ft.FontWeight.W_400,
+        )
+        
+        def on_change_folder(_):
+            def on_selected(new_path: str):
+                dir_text.value = new_path
+                dir_text.update()
+            
+            prompt_folder_selection(self.page, on_selected=on_selected)
+        
+        return ft.Container(
+            padding=20,
+            border=ft.border.all(1, ft.Colors.GREY_300),
+            border_radius=8,
+            bgcolor=ft.Colors.GREY_50,
+            content=ft.Column(
+                controls=[
+                    ft.Text(
+                        "Pasta de Saída de Arquivos",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.BLUE_700,
+                    ),
+                    ft.Container(height=8),
+                    ft.Row(
+                        controls=[
+                            ft.Icon(ft.Icons.FOLDER_OPEN, size=20, color=ft.Colors.BLUE_600),
+                            ft.Text("Pasta atual:", size=13, weight=ft.FontWeight.W_500),
+                        ],
+                        spacing=8,
+                    ),
+                    dir_text,
+                    ft.Container(height=12),
+                    ft.ElevatedButton(
+                        text="Alterar Pasta de Saída",
+                        icon=ft.Icons.FOLDER,
+                        on_click=on_change_folder,
+                        bgcolor=ft.Colors.BLUE_600,
+                        color=ft.Colors.WHITE,
+                        style=ft.ButtonStyle(
+                            shape=ft.RoundedRectangleBorder(radius=6),
+                        ),
+                    ),
+                    ft.Container(height=8),
+                    ft.Text(
+                        "💡 Esta pasta será usada para salvar todos os documentos gerados (propostas, contratos, etc.)",
+                        size=11,
+                        color=ft.Colors.GREY_600,
+                        italic=True,
+                    ),
+                ],
+                spacing=4,
+            ),
+        )
+
     def _create_content_container(self) -> ft.Control:
         return ft.Container(
             padding=20,
             content=ft.Column(
-                controls=[self._create_content_title(), self._create_content_description()],
+                controls=[
+                    self._create_content_title(),
+                    self._create_content_description(),
+                    ft.Container(height=20),
+                    self._create_output_directory_section(),
+                ],
                 spacing=8,
                 alignment=ft.MainAxisAlignment.START,
             ),
@@ -62,3 +131,4 @@ class BackofficeScreen(BaseScreen):
                 color=ft.Colors.GREY,
             ),
         )
+

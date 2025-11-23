@@ -125,8 +125,16 @@ def _create_proposals_table(
             return handler
 
         def make_generate_action(proposal_data):
-            def handler(_):
+            def handler(e):
                 print(f"DEBUG: Generate proposal clicked for {proposal_data.get('id')}")
+                
+                # Loading State
+                btn = e.control
+                original_icon = btn.icon
+                btn.icon = None
+                btn.content = ft.ProgressRing(width=16, height=16, stroke_width=2, color=ft.Colors.BLUE_600)
+                btn.update()
+
                 try:
                     proposal_id = proposal_data.get("id")
                     if not proposal_id:
@@ -169,6 +177,18 @@ def _create_proposals_table(
                     validade = proposal_data.get("proposal_validity") or "-"
                     tipo_proposta = f"Indicativa - Validade até {validade}"
 
+                    # ⚠️ VALIDAÇÃO: Obter e validar pasta de saída
+                    from helpers.storage import get_output_directory
+                    output_dir = get_output_directory(screen.page)
+                    
+                    if not output_dir:
+                        raise Exception(
+                            "⚠️ Pasta de saída não configurada!\n\n"
+                            "Por favor, vá até o Backoffice e clique em "
+                            "'Alterar Pasta de Saída' para escolher onde "
+                            "os arquivos serão salvos."
+                        )
+
                     # Call generator
                     from scripts.proposal_generator import generate_proposal
                     
@@ -188,7 +208,8 @@ def _create_proposals_table(
                         modulacao=proposal_data.get("modulation") or "",
                         pagamento=str(proposal_data.get("billing_due_day") or ""),
                         qty_meses=str(proposal_data.get("guarantee_months") or ""),
-                        tipo_proposta=tipo_proposta
+                        tipo_proposta=tipo_proposta,
+                        output_dir=output_dir  # Pass external directory
                     )
 
                     # Show success
@@ -203,6 +224,12 @@ def _create_proposals_table(
                     screen.page.overlay.append(snackbar)
                     snackbar.open = True
                     screen.page.update()
+                
+                finally:
+                    # Restore State
+                    btn.content = None
+                    btn.icon = original_icon
+                    btn.update()
 
             return handler
             
@@ -250,19 +277,25 @@ def create_propostas_content(screen: Any) -> ft.Control:
     # Container para a tabela que será atualizado
     table_container = ft.Container()
 
-    def load_proposals(search_term: str = ""):
-        print(f"DEBUG: Loading proposals with search_term='{search_term}'")
+    def load_proposals(search_term: str = "", status_filter: Optional[str] = None):
+        print(f"DEBUG: Loading proposals with search_term='{search_term}', status_filter='{status_filter}'")
         try:
             # Fetch all proposals (filtering in memory for partial match)
             all_proposals = read_records("proposals")
             
+            filtered_proposals = all_proposals
+
             if search_term:
                 filtered_proposals = [
-                    p for p in all_proposals 
+                    p for p in filtered_proposals 
                     if search_term.lower() in str(p.get("customer_name", "")).lower()
                 ]
-            else:
-                filtered_proposals = all_proposals
+            
+            if status_filter:
+                filtered_proposals = [
+                    p for p in filtered_proposals
+                    if str(p.get("status", "PENDING")) == status_filter
+                ]
             
             # Sort by created_at desc
             filtered_proposals.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -408,10 +441,55 @@ def create_propostas_content(screen: Any) -> ft.Control:
         ),
     )
 
+    pending_button = ft.ElevatedButton(
+        text="Pendentes",
+        icon=ft.Icons.HOURGLASS_EMPTY,
+        bgcolor=ft.Colors.BLUE_600,
+        color=ft.Colors.WHITE,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+            padding=ft.padding.symmetric(horizontal=0, vertical=0),
+        ),
+        width=button_width,
+        height=button_height,
+        on_click=lambda _: load_proposals(buyer_field.value, "PENDING"),
+    )
+
+    accepted_button = ft.ElevatedButton(
+        text="Aceitas",
+        icon=ft.Icons.CHECK_CIRCLE,
+        bgcolor=ft.Colors.BLUE_600,
+        color=ft.Colors.WHITE,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+            padding=ft.padding.symmetric(horizontal=0, vertical=0),
+        ),
+        width=button_width,
+        height=button_height,
+        on_click=lambda _: load_proposals(buyer_field.value, "ACCEPTED"),
+    )
+
+    all_button = ft.ElevatedButton(
+        text="Todas",
+        icon=ft.Icons.LIST,
+        bgcolor=ft.Colors.BLUE_600,
+        color=ft.Colors.WHITE,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+            padding=ft.padding.symmetric(horizontal=0, vertical=0),
+        ),
+        width=button_width,
+        height=button_height,
+        on_click=lambda _: (setattr(buyer_field, 'value', ''), load_proposals()),
+    )
+
     actions_row = ft.Row(
         controls=[
             search_button,
             new_proposal_button,
+            pending_button,
+            accepted_button,
+            all_button,
         ],
         spacing=12,
         alignment=ft.MainAxisAlignment.START,

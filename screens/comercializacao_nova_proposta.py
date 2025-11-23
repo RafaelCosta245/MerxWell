@@ -513,7 +513,9 @@ def create_nova_proposta_content(screen: Any, proposal_id: Optional[str] = None)
                 garantia_dd.value = p.get("guarantee_type")
                 qty_meses_field.value = str(p.get("guarantee_months") or "")
                 data_base_field.value = p.get("reference_date")
+                data_base_field.value = p.get("reference_date")
                 validade_proposta_field.value = p.get("proposal_validity")
+                form_data["status"] = p.get("status") or "PENDING"
 
                 # 2. Carregar Sazonalidades
                 sazo_data = read_records("proposal_seasonalities", {"proposal_id": proposal_id})
@@ -568,8 +570,7 @@ def create_nova_proposta_content(screen: Any, proposal_id: Optional[str] = None)
                 "guarantee_months": int(str(qty_meses_field.value)) if str(qty_meses_field.value).isdigit() else None,
                 "reference_date": data_base_field.value,
                 "proposal_validity": validade_proposta_field.value,
-                # Status não muda na edição, ou mantemos o existente? 
-                # Se for novo, PENDING. Se edição, não enviamos status para não resetar se já foi aceito.
+                "status": form_data.get("status", "PENDING")
             }
             
             if not proposal_id:
@@ -656,11 +657,43 @@ def create_nova_proposta_content(screen: Any, proposal_id: Optional[str] = None)
                 except:
                     pass
 
+    # --- Status Toggle Logic ---
+    
+    def get_status_button_text(status):
+        return "Proposta aceita" if status == "ACCEPTED" else "Clique aqui para aceitar a proposta"
+
+    def get_status_button_color(status):
+        return ft.Colors.GREEN_600 if status == "ACCEPTED" else ft.Colors.BLUE_600
+
+    def get_status_button_icon(status):
+        return ft.Icons.CHECK_CIRCLE if status == "ACCEPTED" else ft.Icons.CHECK_CIRCLE_OUTLINE
+
+    status_button = ft.ElevatedButton(
+        text=get_status_button_text(form_data.get("status", "PENDING")),
+        icon=get_status_button_icon(form_data.get("status", "PENDING")),
+        bgcolor=get_status_button_color(form_data.get("status", "PENDING")),
+        color=ft.Colors.WHITE,
+        visible=bool(proposal_id), # Only visible in edit mode? User said "quando eu clico para editar".
+    )
+
+    def toggle_status(e):
+        current = form_data.get("status", "PENDING")
+        new_status = "PENDING" if current == "ACCEPTED" else "ACCEPTED"
+        form_data["status"] = new_status
+        
+        status_button.text = get_status_button_text(new_status)
+        status_button.bgcolor = get_status_button_color(new_status)
+        status_button.icon = get_status_button_icon(new_status)
+        status_button.update()
+
+    status_button.on_click = toggle_status
+
     def on_cancel(e):
         screen.navigation.go("/comercializacao", params={"submenu": "propostas"})
 
     actions_row = ft.Row(
         controls=[
+            status_button,
             ft.ElevatedButton("Cancelar", icon=ft.Icons.CANCEL, on_click=on_cancel, bgcolor=ft.Colors.GREY_500, color=ft.Colors.WHITE),
             ft.ElevatedButton("Salvar", icon=ft.Icons.CHECK, on_click=on_save, bgcolor=ft.Colors.GREEN_600, color=ft.Colors.WHITE),
         ],

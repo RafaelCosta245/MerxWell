@@ -2,6 +2,8 @@ import flet as ft
 import os
 
 from config.navigation import create_navigation
+from helpers.paths import get_icon_path
+from helpers.storage import ensure_output_directory_configured
 
 
 def main(page: ft.Page) -> None:
@@ -11,7 +13,7 @@ def main(page: ft.Page) -> None:
     direciona a aplicação para a rota inicial.
     """
     page.title = "MerxWell"
-    page.window.icon = os.path.abspath("assets/icons/LogoMerx256.ico")
+    page.window.icon = get_icon_path("LogoMerx256.ico")
     page.window_width = 1024
     page.window_height = 768
     page.window_resizable = True
@@ -19,9 +21,21 @@ def main(page: ft.Page) -> None:
 
     navigation = create_navigation(page)
 
-    # Usa a rota atual caso exista, senão navega para o backoffice.
-    initial_route = page.route or "/backoffice"
-    navigation.go(initial_route)
+    # Ensure output directory is configured before proceeding
+    def on_directory_configured(directory_path: str):
+        print(f"[MAIN] Output directory configured: {directory_path}")
+        # Navigate to initial route after directory is configured
+        initial_route = page.route or "/backoffice"
+        navigation.go(initial_route)
+    
+    # Check if directory is configured, if not, prompt user
+    if not ensure_output_directory_configured(page, on_configured=on_directory_configured):
+        # Will prompt user for directory, navigation happens in callback
+        pass
+    else:
+        # Already configured, navigate immediately
+        initial_route = page.route or "/backoffice"
+        navigation.go(initial_route)
 
 
 if __name__ == "__main__":

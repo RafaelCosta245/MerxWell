@@ -324,8 +324,16 @@ def generate_proposal(
 		modulacao,
 		pagamento,
 		qty_meses,
-		tipo_proposta
+		tipo_proposta,
+		output_dir  # NEW: External directory for saving files
 ):
+	# ⚠️ VALIDAÇÃO CRÍTICA: output_dir NUNCA pode ser None
+	if not output_dir:
+		raise ValueError(
+			"output_dir não configurado. "
+			"Configure a pasta de saída no Backoffice antes de gerar propostas."
+		)
+	
 	# Mapa de valores simples
 	valores = {
 		"{{DATA_HOJE}}": data_hoje,
@@ -345,18 +353,29 @@ def generate_proposal(
 		"{{TIPO_PROPOSTA}}": tipo_proposta,
 	}
 
-	BASE_DIR = Path(__file__).resolve().parent.parent
-	arquivo_origem = BASE_DIR / "assets" / "documents" / "standard_proposal.docx"
-	arquivo_final_docx = BASE_DIR / "assets" / "documents" / f"{razao_social} - Proposta de Venda de Energia NOVO ATACAREJO.docx"
-	arquivo_final_pdf = BASE_DIR / "assets" / "documents" / f"{razao_social} - Proposta de Venda de Energia NOVO ATACAREJO.pdf"
+	from helpers.paths import get_asset_path, get_output_path
+	
+	# Read template from assets (READ-ONLY)
+	arquivo_origem = get_asset_path("documents", "standard_proposal.docx")
+	
+	# Save generated files to external directory (WRITE)
+	arquivo_final_docx = get_output_path(output_dir, f"{razao_social} - Proposta de Venda de Energia NOVO ATACAREJO.docx")
+	arquivo_final_pdf = get_output_path(output_dir, f"{razao_social} - Proposta de Venda de Energia NOVO ATACAREJO.pdf")
 
 	print(f"Iniciando geração de proposta...")
 
 	try:
 		import pythoncom
+		import shutil
 		pythoncom.CoInitialize()
 
-		doc = Document(arquivo_origem)
+		# ⚠️ CORREÇÃO: Copiar template para output_dir ANTES de abrir
+		# Isso evita que o Word crie arquivos temporários em assets/
+		temp_template = get_output_path(output_dir, "_temp_template.docx")
+		shutil.copy2(str(arquivo_origem), str(temp_template))
+		
+		# Agora abre a cópia no output_dir (não o original em assets)
+		doc = Document(temp_template)
 
 		# 1. Criar tabelas dinâmicas (Volume e Preço)
 		# Preparar dados formatados
@@ -376,14 +395,57 @@ def generate_proposal(
 		# 3. Remover negrito após rótulos
 		remover_negrito_apos_rotulos(doc)
 
-		# Salvar e Converter
+		# Salvar DOCX
 		doc.save(arquivo_final_docx)
-		print("Documento DOCX salvo.")
+		print(f"Documento DOCX salvo em: {arquivo_final_docx}")
+		
+		# ⚠️ IMPORTANTE: Fechar o documento antes de converter
+		# Isso libera o arquivo para o docx2pdf acessar
+		doc = None
+		
+		# Limpar arquivo temporário
+		try:
+			temp_template.unlink()
+			print("Template temporário removido.")
+		except Exception as e:
+			print(f"Aviso: Não foi possível remover template temporário: {e}")
 
-		convert(str(arquivo_final_docx), str(arquivo_final_pdf))
+		# Converter para PDF
+		# Garantir que os caminhos são strings absolutas
+		docx_path = str(arquivo_final_docx.resolve())
+		pdf_path = str(arquivo_final_pdf.resolve())
+		
+		print(f"Convertendo para PDF...")
+		print(f"  DOCX: {docx_path}")
+		print(f"  PDF:  {pdf_path}")
+		
+		# ⚠️ CORREÇÃO CRÍTICA PARA CX_FREEZE:
+		# Em apps GUI congelados, sys.stdout e sys.stderr são None.
+		# A biblioteca docx2pdf (via tqdm) tenta escrever neles e causa erro:
+		# 'NoneType' object has no attribute 'write'
+		# Solução: Redirecionar para um dummy writer se necessário.
+		
+		class DummyWriter:
+			def write(self, message): pass
+			def flush(self): pass
+			
+		import sys
+		original_stdout = sys.stdout
+		original_stderr = sys.stderr
+		
+		try:
+			if sys.stdout is None: sys.stdout = DummyWriter()
+			if sys.stderr is None: sys.stderr = DummyWriter()
+			
+			convert(docx_path, pdf_path)
+			
+		finally:
+			sys.stdout = original_stdout
+			sys.stderr = original_stderr
+			
 		print("PDF gerado com sucesso.")
 
-		return str(arquivo_final_pdf)
+		return pdf_path
 
 	except PermissionError:
 		print("ERRO: O arquivo está aberto em outro programa. Por favor, feche o Word e tente novamente.")
